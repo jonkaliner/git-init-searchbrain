@@ -43,15 +43,17 @@ find it itself, so the collect step decides the quality of everything else.
 - Ask questions in a simple chat (terminal is fine) and get answers based
   on the stored data, with the source link
 - Log errors to a file
+- Streamlit web page with tabs for chat, startup table (filters, detail view,
+  CSV download), map, charts and favorites / saved searches
 
 ## Later (not now)
-- Show the map inside the chat, e.g. as the answer to "show me all battery
-  startups in Europe" (would need a simple web UI such as Streamlit)
+- Show the map inside a chat answer, e.g. "show me all battery startups in
+  Europe" returns a filtered map
 - Slack chat interface and Slack error alerts
 - Cognee (knowledge graph), once links between companies matter
 
 ## Out of scope for now
-- A full web app, user accounts
+- A full web app beyond the local Streamlit page, user accounts
 - Anything that needs paid services
 
 ## Open questions (ask me before building)
@@ -79,3 +81,12 @@ To be filled in once the first version works.
 ## Decisions made
 - 2026-10-29: Python, local database, NVIDIA API, architecture based on the n8n template
 - 2026-10-29: world map with Folium and Nominatim geocoding is part of the first version
+- 2026-10-29: web search with Tavily (free tier). Gemini with Google Search
+  grounding was tried, but its free search quota was not available
+- 2026-10-29: NVIDIA model `openai/gpt-oss-20b` (older models were retired);
+  can be changed with `NVIDIA_MODEL` in .env
+- 2026-10-29: no fixed age limit. Every startup found is stored, founding year
+  is a filter when asking
+- 2026-10-29: first topic is humanoid robotics (incl. hands, actuators, sensors), worldwide
+- 2026-10-29: if only the country is known, show one marker per country
+- 2026-10-29: Streamlit web page is part of the first version
