@@ -158,6 +158,49 @@ def merge_duplicates(conn: sqlite3.Connection) -> list[str]:
     return merged
 
 
+COUNTRY_ALIASES = {
+    "usa": "united states", "us": "united states", "u.s.": "united states", "america": "united states",
+    "uk": "united kingdom", "britain": "united kingdom", "great britain": "united kingdom",
+    "korea": "south korea", "holland": "netherlands",
+}
+
+
+def search_startups(
+    conn: sqlite3.Connection,
+    keyword: str | None = None,
+    countries: list[str] | None = None,
+    city: str | None = None,
+    founded_since: int | None = None,
+    limit: int = 15,
+) -> list[Startup]:
+    """Search the stored startups. All given filters must match.
+
+    keyword: every word must appear somewhere in name, description, summary or industry
+    ("robot hand" also finds "robotic hands").
+    """
+    where, params = [], []
+    for word in (keyword or "").lower().split():
+        where.append("LOWER(name || ' ' || COALESCE(description, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE(industry, '')) LIKE ?")
+        params.append(f"%{word}%")
+    names = [COUNTRY_ALIASES.get(c.strip().lower(), c.strip().lower()) for c in countries or [] if c.strip()]
+    if names:
+        where.append(f"LOWER(country) IN ({', '.join('?' for _ in names)})")
+        params.extend(names)
+    if city:
+        where.append("LOWER(city) = ?")
+        params.append(city.strip().lower())
+    if founded_since:
+        where.append("founding_year >= ?")
+        params.append(founded_since)
+
+    sql = f"SELECT {', '.join(STARTUP_COLUMNS)} FROM startups"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY name COLLATE NOCASE LIMIT ?"
+    rows = conn.execute(sql, [*params, limit])
+    return [Startup(**dict(row)) for row in rows]
+
+
 def all_startups(conn: sqlite3.Connection) -> list[Startup]:
     """Return every stored startup, sorted by name."""
     rows = conn.execute(f"SELECT {', '.join(STARTUP_COLUMNS)} FROM startups ORDER BY name COLLATE NOCASE")
