@@ -1,0 +1,10 @@
+openai
+python-dotenv
+tavily-python
+google-genai
+streamlit
+pandas
+geopy
+folium
+streamlit-folium
+pytest
