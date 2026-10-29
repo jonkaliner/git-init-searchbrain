@@ -1,0 +1,138 @@
+"""Step 7: collect startups for a topic and store them.
+
+search -> extract -> fill in from database -> geocode -> summarize -> save -> world map
+
+Run with:
+  .venv\\Scripts\\python.exe -m searchbrain.collect "humanoid robotics" --sub "robot hand" --sub "actuator"
+"""
+
+import argparse
+import json
+import re
+from collections import Counter
+
+from searchbrain import db, llm
+from searchbrain.extract import extract_startups
+from searchbrain.geocode import geocode_all
+from searchbrain.log import get_logger
+from searchbrain.models import Startup
+from searchbrain.search import build_queries, search
+from searchbrain.worldmap import save_map
+
+logger = get_logger(__name__)
+
+SUMMARY_BATCH = 10
+
+SUMMARY_PROMPT = """Reasoning: low
+Write a short profile for each startup: 1-2 sentences, at most 40 words.
+Only use the given facts. Do not add anything that is not in the facts.
+Answer with JSON only, in the same order as the input:
+{"summaries": ["...", "..."]}"""
+
+
+def topic_queries(topic: str, subtopics: list[str]) -> list[str]:
+    """The general queries for the topic plus one query per subtopic."""
+    return build_queries(keyword=topic) + [f"{sub} startup {topic}" for sub in subtopics]
+
+
+def fill_from_db(conn, startup: Startup) -> None:
+    """Take over known fields (e.g. city, summary) from an earlier run."""
+    existing = db.find_startup(conn, startup)
+    if existing is None:
+        return
+    for field, value in vars(existing).items():
+        if getattr(startup, field) in (None, "") and value not in (None, ""):
+            setattr(startup, field, value)
+
+
+def summarize(startups: list[Startup]) -> None:
+    """Add a summary to every startup that has none yet. Falls back to the description."""
+    todo = [s for s in startups if not s.summary]
+    for start in range(0, len(todo), SUMMARY_BATCH):
+        batch = todo[start : start + SUMMARY_BATCH]
+        facts = [
+            {k: v for k, v in vars(s).items() if k in {"name", "description", "industry", "country", "city", "founding_year"} and v}
+            for s in batch
+        ]
+        try:
+            answer = llm.chat(SUMMARY_PROMPT, json.dumps(facts, ensure_ascii=False))
+            summaries = json.loads(re.search(r"\{.*\}", answer, re.DOTALL).group(0))["summaries"]
+            if len(summaries) != len(batch):
+                raise ValueError(f"expected {len(batch)} summaries, got {len(summaries)}")
+        except Exception as error:
+            logger.error("Summary batch failed, using descriptions instead: %s", error)
+            summaries = [None] * len(batch)
+        for startup, summary in zip(batch, summaries):
+            startup.summary = (summary or "").strip() or startup.description or None
+
+
+def collect(topic: str, subtopics: list[str] | None = None, on_progress=None) -> dict:
+    """Run the whole collect step for one topic. Returns counts for the report.
+
+    on_progress(batch_number, batch_count, status) is passed on to the extraction.
+    """
+    logger.info("Collect started: %s %s", topic, subtopics or "")
+    conn = db.connect()
+
+    hits = search(topic_queries(topic, subtopics or []))
+    statuses = Counter()
+
+    def track(number: int, count: int, status: str) -> None:
+        statuses[status] += 1
+        if on_progress:
+            on_progress(number, count, status)
+
+    startups = extract_startups(hits, topic=topic, on_progress=track)
+    for startup in startups:
+        fill_from_db(conn, startup)
+    requests = geocode_all(conn, startups)
+    summarize(startups)
+
+    results = Counter(db.upsert_startup(conn, startup) for startup in startups)
+    everything = db.all_startups(conn)
+    map_file = save_map(everything)
+
+    report = {
+        "hits": len(hits),
+        "batches": statuses,
+        "extracted": len(startups),
+        "new": results["new"],
+        "updated": results["updated"],
+        "geocode_requests": requests,
+        "precision": Counter(s.location_precision or "not geocoded" for s in startups),
+        "total_in_db": len(everything),
+        "map_file": map_file,
+    }
+    logger.info("Collect finished: %s", {k: v for k, v in report.items() if k != "map_file"})
+    return report
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Collect startups for a topic and save them.")
+    parser.add_argument("topic")
+    parser.add_argument("--sub", action="append", default=[], help="extra subtopic, can be repeated")
+    args = parser.parse_args()
+
+    def show(number: int, count: int, status: str) -> None:
+        print(f"  extraction batch {number}/{count}: {status}")
+
+    try:
+        report = collect(args.topic, args.sub, on_progress=show)
+    except Exception:
+        logger.exception("Collect failed")
+        print("Collect failed, see logs/searchbrain.log")
+        raise SystemExit(1)
+
+    batches = report["batches"]
+    print(f"Search hits:        {report['hits']}")
+    print(f"Extraction batches: {dict(batches)}")
+    if batches["failed"]:
+        print(f"                    {batches['failed']} failed, run the same command again to retry only those")
+    print(f"Startups extracted: {report['extracted']} ({report['new']} new, {report['updated']} updated)")
+    print(f"Location:           {dict(report['precision'])} ({report['geocode_requests']} Nominatim requests)")
+    print(f"Startups in DB:     {report['total_in_db']}")
+    print(f"World map:          {report['map_file'].resolve()}")
+
+
+if __name__ == "__main__":
+    main()

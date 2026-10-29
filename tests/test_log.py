@@ -11,3 +11,7 @@ def test_api_key_is_hidden_in_log(monkeypatch):
 
     assert "tvly-test-secret" not in record.getMessage()
     assert "***" in record.getMessage()
+
+
+def test_main_module_logs_into_searchbrain_log():
+    assert log.get_logger("__main__").name == "searchbrain.main"

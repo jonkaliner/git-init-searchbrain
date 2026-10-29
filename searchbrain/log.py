@@ -28,6 +28,9 @@ class HideSecrets(logging.Filter):
 
 def get_logger(name: str = "searchbrain") -> logging.Logger:
     """Return a logger that writes to logs/searchbrain.log."""
+    if not name.startswith("searchbrain"):
+        # e.g. "__main__" when a module is run with python -m
+        name = f"searchbrain.{name.strip('_')}"
     root = logging.getLogger("searchbrain")
     if not root.handlers:
         LOG_FILE.parent.mkdir(exist_ok=True)

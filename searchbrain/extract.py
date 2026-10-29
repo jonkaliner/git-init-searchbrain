@@ -4,9 +4,13 @@ Try it with:  .venv\\Scripts\\python.exe -m searchbrain.extract "dexterous robot
 """
 
 import argparse
+import hashlib
 import json
 import re
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
+from pathlib import Path
 
 from searchbrain import db, llm
 from searchbrain.log import get_logger
@@ -15,7 +19,10 @@ from searchbrain.search import SearchHit, build_queries, search
 
 logger = get_logger(__name__)
 
-BATCH_SIZE = 5
+BATCH_SIZE = 2  # small batches keep each request short enough for the free NVIDIA tier
+TEXT_PER_HIT = 1000
+PARALLEL_REQUESTS = 1  # the free NVIDIA tier queues parallel requests per key, so more only causes timeouts
+CACHE_FILE = Path("data") / "extract_cache.json"
 
 # Regions are not countries and cannot be placed on the map as one marker
 REGIONS = {
@@ -31,7 +38,9 @@ Rules:
 - If a field is not in the text, use null.
 - Only young, independent companies (startups). Skip big corporations, universities,
   research projects, investors, media sites and market research firms.
-- One search result can mention several startups (e.g. list articles). Extract each one.
+- One search result can mention several startups (e.g. list articles). Extract each one,
+  but at most 10 per search result: take the ones with the most facts.
+- Keep "description" short: one sentence, at most 25 words.
 - "link" is the startup's own website, only if it appears in the text. Otherwise null.
 - "source_url" is the url of the search result where you found the startup.
 - "founding_year" is a number like 2023, or null.
@@ -47,7 +56,7 @@ If there are no startups, answer {"startups": []}."""
 
 def _hits_as_text(hits: list[SearchHit]) -> str:
     return json.dumps(
-        [{"title": hit.title, "url": hit.url, "text": hit.content[:1500]} for hit in hits],
+        [{"title": hit.title, "url": hit.url, "text": hit.content[:TEXT_PER_HIT]} for hit in hits],
         ensure_ascii=False,
         indent=1,
     )
@@ -95,7 +104,7 @@ def to_startup(raw: dict, allowed_sources: set[str], topic: str | None) -> Start
     return Startup(
         name=name,
         description=_clean_text(raw.get("description")) or "",
-        industry=_clean_text(raw.get("industry")),
+        industry=(_clean_text(raw.get("industry")) or "").lower() or None,
         country=country,
         city=city,
         founding_year=_clean_year(raw.get("founding_year")),
@@ -108,36 +117,104 @@ def to_startup(raw: dict, allowed_sources: set[str], topic: str | None) -> Start
 
 def merge_duplicates(startups: list[Startup]) -> list[Startup]:
     """Combine records of the same company (same domain or name), keeping the first known value."""
-    merged: dict[str, Startup] = {}
+    merged: list[Startup] = []
+    by_key: dict[str, Startup] = {}  # website key and name key both point to the same record
     for startup in startups:
-        key = db.startup_key(startup)
-        if key not in merged:
-            merged[key] = startup
-            continue
-        existing = merged[key]
-        for field, value in vars(startup).items():
-            if getattr(existing, field) in (None, "") and value not in (None, ""):
-                setattr(existing, field, value)
-    return list(merged.values())
+        keys = {db.startup_key(startup), db.name_key(startup)}
+        existing = next((by_key[key] for key in keys if key in by_key), None)
+        if existing is None:
+            existing = startup
+            merged.append(startup)
+        else:
+            for field, value in vars(startup).items():
+                if getattr(existing, field) in (None, "") and value not in (None, ""):
+                    setattr(existing, field, value)
+        for key in keys | {db.startup_key(existing), db.name_key(existing)}:
+            by_key[key] = existing
+    return merged
 
 
-def _extract_batch(hits: list[SearchHit]) -> list[dict]:
-    """Ask the model about one batch of hits. Retry once if the answer is not valid JSON."""
+def _batch_key(hits: list[SearchHit]) -> str:
+    """Same hits + same prompt = same key, so a changed prompt is extracted again."""
+    text = SYSTEM_PROMPT + _hits_as_text(hits)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _load_cache() -> dict:
+    if CACHE_FILE.exists():
+        return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+    return {}
+
+
+def _save_cache(cache: dict) -> None:
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+def _extract_batch(hits: list[SearchHit]) -> list[dict] | None:
+    """Ask the model about one batch of hits. Retry once if the answer is not valid JSON.
+
+    Returns None if the batch failed, so it is not cached and a later run tries again.
+    """
     for attempt in (1, 2):
-        answer = llm.chat(SYSTEM_PROMPT, _hits_as_text(hits))
+        try:
+            answer = llm.chat(SYSTEM_PROMPT, _hits_as_text(hits))
+        except Exception as error:  # API errors, but also network errors in the middle of a stream
+            logger.error("Extraction request failed (attempt %s): %s: %s", attempt, type(error).__name__, error)
+            continue
         try:
             return parse_answer(answer)
         except (ValueError, json.JSONDecodeError) as error:
             logger.error("Extraction attempt %s failed: %s. Answer started with: %r", attempt, error, answer[:200])
-    return []
+    return None
 
 
-def extract_startups(hits: list[SearchHit], topic: str | None = None) -> list[Startup]:
-    """Extract startups from all hits, in batches, and merge duplicates."""
+def extract_startups(
+    hits: list[SearchHit],
+    topic: str | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> list[Startup]:
+    """Extract startups from all hits, in batches, and merge duplicates.
+
+    Successful batches are cached, failed batches are skipped (and retried on the next run).
+    on_progress(batch_number, batch_count, status) is called after each batch.
+    """
     allowed_sources = {hit.url for hit in hits}
+    batches = [hits[start : start + BATCH_SIZE] for start in range(0, len(hits), BATCH_SIZE)]
+    keys = [_batch_key(batch) for batch in batches]
+    cache = _load_cache()
+    results: dict[int, list[dict]] = {}
+    finished = 0
+
+    def report(status: str) -> None:
+        nonlocal finished
+        finished += 1
+        if on_progress:
+            on_progress(finished, len(batches), status)
+
+    for index, key in enumerate(keys):
+        if key in cache:
+            results[index] = cache[key]
+            report("cached")
+
+    # The model calls run in parallel; cache and progress are only touched here in the main thread
+    pending = [index for index in range(len(batches)) if index not in results]
+    with ThreadPoolExecutor(max_workers=PARALLEL_REQUESTS) as pool:
+        futures = {pool.submit(_extract_batch, batches[index]): index for index in pending}
+        for future in as_completed(futures):
+            index = futures[future]
+            raw_list = future.result()
+            if raw_list is None:
+                results[index] = []
+                report("failed")
+            else:
+                results[index] = cache[keys[index]] = raw_list
+                _save_cache(cache)
+                report("done")
+
     startups = []
-    for start in range(0, len(hits), BATCH_SIZE):
-        for raw in _extract_batch(hits[start : start + BATCH_SIZE]):
+    for index in range(len(batches)):  # original order, so the result does not depend on timing
+        for raw in results[index]:
             if isinstance(raw, dict) and (startup := to_startup(raw, allowed_sources, topic)):
                 startups.append(startup)
     return merge_duplicates(startups)

@@ -1,8 +1,11 @@
+import httpx
 import pytest
+from openai import APITimeoutError
 
-from searchbrain import db
+from searchbrain import db, extract
 from searchbrain.extract import merge_duplicates, parse_answer, to_startup
 from searchbrain.models import Startup
+from searchbrain.search import SearchHit
 
 SOURCES = {"https://example.com/article"}
 
@@ -47,6 +50,44 @@ def test_to_startup_without_name_is_skipped():
 
 def test_merge_duplicates_with_legal_suffix():
     merged = merge_duplicates([Startup(name="Proception"), Startup(name="Proception Inc", country="United States")])
+    assert len(merged) == 1
+    assert merged[0].country == "United States"
+
+
+def _hits(count: int) -> list[SearchHit]:
+    return [SearchHit(title=f"Hit {i}", url=f"https://example.com/{i}", content=f"Startup{i} builds hands.", score=1) for i in range(count)]
+
+
+def test_failed_batch_is_skipped_and_retried_next_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(extract, "CACHE_FILE", tmp_path / "extract_cache.json")
+    monkeypatch.setattr(extract, "BATCH_SIZE", 5)
+    calls = []
+
+    def flaky_chat(system, user):
+        calls.append(user)
+        if "Startup0" in user:  # the first batch always times out
+            raise APITimeoutError(request=httpx.Request("POST", "https://example.com"))
+        return '{"startups": [{"name": "Startup5"}]}'
+
+    monkeypatch.setattr(extract.llm, "chat", flaky_chat)
+    statuses = []
+    startups = extract.extract_startups(_hits(10), on_progress=lambda n, total, status: statuses.append(status))
+
+    assert sorted(statuses) == ["done", "failed"]
+    assert [s.name for s in startups] == ["Startup5"]
+
+    # Second run: only the failed batch is sent again (2 attempts), the other one comes from the cache
+    calls.clear()
+    statuses.clear()
+    extract.extract_startups(_hits(10), on_progress=lambda n, total, status: statuses.append(status))
+    assert sorted(statuses) == ["cached", "failed"]
+    assert len(calls) == 2
+
+
+def test_merge_duplicates_with_and_without_link():
+    merged = merge_duplicates(
+        [Startup(name="Agility Robotics", link="https://agilityrobotics.com"), Startup(name="Agility Robotics", country="United States")]
+    )
     assert len(merged) == 1
     assert merged[0].country == "United States"
 
