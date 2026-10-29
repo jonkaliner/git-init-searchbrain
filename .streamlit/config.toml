@@ -1,0 +1,16 @@
+[theme]
+base = "light"
+primaryColor = "#2563EB"
+backgroundColor = "#F5F5F5"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#111827"
+font = "sans serif"
+
+[server]
+# no "enter your email" question in the terminal on first start
+headless = true
+# only reachable from this computer, so nobody else can use your API keys through the page
+address = "localhost"
+
+[browser]
+gatherUsageStats = false

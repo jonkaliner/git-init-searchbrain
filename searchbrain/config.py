@@ -10,7 +10,9 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "openai/gpt-oss-20b")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
-REQUIRED_KEYS = ["NVIDIA_API_KEY", "TAVILY_API_KEY", "NOMINATIM_USER_AGENT"]
+USER_NAME = os.getenv("USER_NAME", "").strip()
+
+REQUIRED_KEYS =["NVIDIA_API_KEY", "TAVILY_API_KEY", "NOMINATIM_USER_AGENT"]
 
 
 class ConfigError(Exception):

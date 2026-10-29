@@ -16,7 +16,7 @@ from searchbrain.models import Startup
 MAP_FILE = Path("data") / "map.html"
 
 
-def _safe_url(url: str | None) -> str | None:
+def safe_url(url: str | None) -> str | None:
     """Only allow normal web links in popups."""
     if not url:
         return None
@@ -28,7 +28,7 @@ def _safe_url(url: str | None) -> str | None:
 
 
 def _link(url: str | None, label: str) -> str:
-    safe = _safe_url(url)
+    safe = safe_url(url)
     return f'<a href="{escape(safe)}" target="_blank">{escape(label)}</a>' if safe else ""
 
 

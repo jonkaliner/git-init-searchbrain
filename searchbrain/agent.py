@@ -9,6 +9,7 @@ Run with:  .venv\\Scripts\\python.exe -m searchbrain.agent
 
 import json
 import sys
+import time
 from dataclasses import dataclass, field
 
 from searchbrain import config, db, llm
@@ -28,6 +29,8 @@ Rules:
 - If nothing is found, you may search once more with fewer or broader words.
   If there is still nothing, say that the database has no matching startups.
 - For regions like Europe or Asia, pass the list of countries in that region.
+- If the question only asks about a place or a founding year (no technology), search without keyword.
+  Words like "startup", "company" or the general topic of the database are not keywords.
 - If a value (city, founding year) is unknown, say it is unknown. Do not guess.
 - Answer in the language of the question. Keep the answer short and use a list for several startups."""
 
@@ -60,6 +63,22 @@ TOOLS = [
         },
     }
 ]
+
+
+EMPTY_RESPONSE_RETRIES = 2
+
+
+def _complete(messages: list[dict]):
+    """One model call. The free NVIDIA tier sometimes sends a response without choices: retry those."""
+    for attempt in range(EMPTY_RESPONSE_RETRIES + 1):
+        response = llm.client().chat.completions.create(
+            model=config.NVIDIA_MODEL, messages=messages, tools=TOOLS, temperature=0, max_tokens=2000
+        )
+        if response.choices:
+            return response.choices[0].message
+        logger.error("Empty response from the model (attempt %s): %s", attempt + 1, str(response.model_extra)[:300])
+        time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError("the model sent empty responses")
 
 
 @dataclass
@@ -98,10 +117,7 @@ def ask(question: str, history: list[dict] | None = None, conn=None) -> Answer:
 
     try:
         for _ in range(MAX_TOOL_ROUNDS + 1):
-            response = llm.client().chat.completions.create(
-                model=config.NVIDIA_MODEL, messages=messages, tools=TOOLS, temperature=0, max_tokens=2000
-            )
-            message = response.choices[0].message
+            message = _complete(messages)
             if not message.tool_calls:
                 text = (message.content or "").strip() or "Sorry, I could not produce an answer."
                 break

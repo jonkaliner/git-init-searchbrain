@@ -44,6 +44,25 @@ CREATE TABLE IF NOT EXISTS geocode_cache (
     found INTEGER NOT NULL,
     looked_up_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS favorites (
+    key TEXT PRIMARY KEY,
+    added_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+    name TEXT PRIMARY KEY,
+    filters TEXT NOT NULL,
+    saved_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chats (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    messages TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -51,21 +70,28 @@ LOCATION_FIELDS = ["city", "country", "latitude", "longitude", "location_precisi
 PRECISION_RANK = {"city": 3, "country": 2, "none": 1, None: 0}
 
 
-def connect(path: Path = DB_FILE) -> sqlite3.Connection:
-    """Open the database (and create it on first use)."""
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    """Open the database (and create it on first use). Default: DB_FILE."""
+    path = path or DB_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _add_column(conn, "saved_searches", "last_seen_at", "TEXT")
     _add_name_key_column(conn)
     return conn
 
 
+def _add_column(conn: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
+    """Add a column that older databases do not have yet."""
+    if column not in {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+        conn.commit()
+
+
 def _add_name_key_column(conn: sqlite3.Connection) -> None:
     """Databases from before 2026-10-29 have no name_key column: add and fill it."""
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(startups)")}
-    if "name_key" not in columns:
-        conn.execute("ALTER TABLE startups ADD COLUMN name_key TEXT")
+    _add_column(conn, "startups", "name_key", "TEXT")
     for row in conn.execute("SELECT id, name FROM startups WHERE name_key IS NULL").fetchall():
         conn.execute("UPDATE startups SET name_key = ? WHERE id = ?", (name_key(Startup(name=row["name"])), row["id"]))
     conn.execute("CREATE INDEX IF NOT EXISTS startups_name_key ON startups (name_key)")
@@ -88,7 +114,7 @@ def startup_key(startup: Startup) -> str:
     return name_key(startup)
 
 
-def _existing_key(conn: sqlite3.Connection, startup: Startup) -> str | None:
+def existing_key(conn: sqlite3.Connection, startup: Startup) -> str | None:
     """Find the stored row of this company: first by website/key, then by normalized name."""
     key = startup_key(startup)
     row = conn.execute(
@@ -100,7 +126,7 @@ def _existing_key(conn: sqlite3.Connection, startup: Startup) -> str | None:
 
 def upsert_startup(conn: sqlite3.Connection, startup: Startup) -> str:
     """Insert a new startup or fill in missing fields of an existing one. Returns "new" or "updated"."""
-    existing = _existing_key(conn, startup)
+    existing = existing_key(conn, startup)
     key = existing or startup_key(startup)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -120,7 +146,7 @@ def upsert_startup(conn: sqlite3.Connection, startup: Startup) -> str:
 
 def find_startup(conn: sqlite3.Connection, startup: Startup) -> Startup | None:
     """Return the stored version of this company (matched by website or name), or None."""
-    key = _existing_key(conn, startup)
+    key = existing_key(conn, startup)
     if key is None:
         return None
     row = conn.execute(f"SELECT {', '.join(STARTUP_COLUMNS)} FROM startups WHERE key = ?", (key,)).fetchone()
@@ -203,5 +229,15 @@ def search_startups(
 
 def all_startups(conn: sqlite3.Connection) -> list[Startup]:
     """Return every stored startup, sorted by name."""
-    rows = conn.execute(f"SELECT {', '.join(STARTUP_COLUMNS)} FROM startups ORDER BY name COLLATE NOCASE")
-    return [Startup(**dict(row)) for row in rows]
+    return [startup for _, startup in all_startups_with_keys(conn)]
+
+
+def created_times(conn: sqlite3.Connection) -> dict[str, str]:
+    """When each startup (by key) was first stored, e.g. to show what is new for a Scout."""
+    return {row["key"]: row["created_at"] for row in conn.execute("SELECT key, created_at FROM startups")}
+
+
+def all_startups_with_keys(conn: sqlite3.Connection) -> list[tuple[str, Startup]]:
+    """Like all_startups, but with each row's key (needed e.g. for favorites)."""
+    rows = conn.execute(f"SELECT key, {', '.join(STARTUP_COLUMNS)} FROM startups ORDER BY name COLLATE NOCASE")
+    return [(row["key"], Startup(**{col: row[col] for col in STARTUP_COLUMNS})) for row in rows]

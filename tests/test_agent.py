@@ -67,6 +67,25 @@ def test_ask_runs_tool_and_returns_answer_with_found_startups(tmp_path, monkeypa
     assert [m["role"] for m in history] == ["user", "assistant"]
 
 
+def test_ask_retries_empty_responses(tmp_path, monkeypatch):
+    fake = FakeModel('{"keyword": "robot hand"}')
+    real_create = fake.create
+    calls = {"n": 0}
+
+    def sometimes_empty(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:  # first response has no choices, like the free tier sometimes sends
+            return SimpleNamespace(choices=None, model_extra={})
+        return real_create(**kwargs)
+
+    fake.chat.completions.create = sometimes_empty
+    monkeypatch.setattr(agent.llm, "client", lambda: fake)
+    monkeypatch.setattr(agent.time, "sleep", lambda seconds: None)
+
+    answer = agent.ask("Robot hands?", conn=make_db(tmp_path))
+    assert "Linkerbot" in answer.text
+
+
 def test_ask_reports_service_errors(tmp_path, monkeypatch):
     def broken():
         raise TimeoutError("slow")
