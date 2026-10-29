@@ -11,6 +11,9 @@ from searchbrain.models import Startup
 
 DB_FILE = Path("data") / "searchbrain.db"
 
+# Legal suffixes that do not change which company is meant ("Proception Inc" = "Proception")
+LEGAL_SUFFIXES = r"\b(inc|incorporated|ltd|limited|llc|gmbh|ag|sa|sas|bv|plc|corp|corporation|co)\b\.?"
+
 STARTUP_COLUMNS = [field.name for field in fields(Startup)]
 
 SCHEMA = """
@@ -52,7 +55,8 @@ def startup_key(startup: Startup) -> str:
         domain = domain.removeprefix("www.")
         if domain:
             return domain
-    return re.sub(r"[^a-z0-9]", "", startup.name.lower())
+    name = re.sub(LEGAL_SUFFIXES, "", startup.name.lower())
+    return re.sub(r"[^a-z0-9]", "", name)
 
 
 def upsert_startup(conn: sqlite3.Connection, startup: Startup) -> str:
