@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS startups (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    key TEXT PRIMARY KEY,
+    latitude REAL,
+    longitude REAL,
+    found INTEGER NOT NULL,
+    looked_up_at TEXT NOT NULL
+);
 """
 
 
