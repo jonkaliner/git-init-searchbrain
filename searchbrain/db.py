@@ -191,6 +191,11 @@ COUNTRY_ALIASES = {
 }
 
 
+def keyword_stems(keyword: str | None) -> list[str]:
+    """Search words without a plural "s", so "sensors" also finds "sensor"."""
+    return [word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word for word in (keyword or "").lower().split()]
+
+
 def search_startups(
     conn: sqlite3.Connection,
     keyword: str | None = None,
@@ -205,7 +210,7 @@ def search_startups(
     ("robot hand" also finds "robotic hands").
     """
     where, params = [], []
-    for word in (keyword or "").lower().split():
+    for word in keyword_stems(keyword):
         where.append("LOWER(name || ' ' || COALESCE(description, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE(industry, '')) LIKE ?")
         params.append(f"%{word}%")
     names = [COUNTRY_ALIASES.get(c.strip().lower(), c.strip().lower()) for c in countries or [] if c.strip()]
@@ -230,6 +235,11 @@ def search_startups(
 def all_startups(conn: sqlite3.Connection) -> list[Startup]:
     """Return every stored startup, sorted by name."""
     return [startup for _, startup in all_startups_with_keys(conn)]
+
+
+def topics(conn: sqlite3.Connection) -> list[str]:
+    """The areas (collect topics) in the database, e.g. ["humanoid robotics", "lidar sensors"]."""
+    return [row["topic"] for row in conn.execute("SELECT DISTINCT topic FROM startups WHERE topic IS NOT NULL ORDER BY topic")]
 
 
 def created_times(conn: sqlite3.Connection) -> dict[str, str]:

@@ -41,8 +41,19 @@ def _popup_html(startup: Startup) -> str:
     return f"<b>{escape(startup.name)}</b><br><small>{details}</small><br>{text}<br>{links}"
 
 
+ESRI_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/{layer}/MapServer/tile/{{z}}/{{y}}/{{x}}"
+ESRI_ATTRIBUTION = "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ"
+
+
 def build_map(startups: list[Startup]) -> folium.Map:
-    world = folium.Map(location=[25, 10], zoom_start=2, tiles="OpenStreetMap")
+    # Light grey base map plus a separate layer with English place names (no API key needed).
+    # OpenStreetMap tiles would show names in the local language, e.g. Arabic or Chinese.
+    world = folium.Map(
+        location=[25, 10], zoom_start=2, max_zoom=16, tiles=ESRI_TILES.format(layer="World_Light_Gray_Base"), attr=ESRI_ATTRIBUTION
+    )
+    folium.TileLayer(
+        ESRI_TILES.format(layer="World_Light_Gray_Reference"), attr=ESRI_ATTRIBUTION, name="Labels", overlay=True, control=False
+    ).add_to(world)
     cluster = MarkerCluster(name="Startups (city known)").add_to(world)
     by_country: dict[str, list[Startup]] = defaultdict(list)
 

@@ -67,6 +67,32 @@ def test_ask_runs_tool_and_returns_answer_with_found_startups(tmp_path, monkeypa
     assert [m["role"] for m in history] == ["user", "assistant"]
 
 
+def test_ask_returns_web_search_proposal(tmp_path, monkeypatch):
+    fake = FakeModel('{"keyword": "lidar"}')
+    fake.answers[0].tool_calls.append(
+        SimpleNamespace(id="call_2", function=SimpleNamespace(name="propose_web_search", arguments='{"topic": "lidar sensors", "subtopics": ["automotive lidar"]}'))
+    )
+    fake.answers[1].content = "The database has no lidar startups yet. You can start a web search below."
+    monkeypatch.setattr(agent.llm, "client", lambda: fake)
+
+    answer = agent.ask("I am searching for lidar companies", conn=make_db(tmp_path))
+
+    assert answer.web_search == {"topic": "lidar sensors", "subtopics": ["automotive lidar"]}
+    assert "NOT run" in fake.requests[1]["messages"][-1]["content"]  # the model is told the search did not run
+
+
+def test_parse_proposal_checks_arguments():
+    assert agent.parse_proposal('{"topic": " lidar ", "subtopics": ["a", "b", "c", "d", ""]}') == {"topic": "lidar", "subtopics": ["a", "b", "c"]}
+    assert agent.parse_proposal('{"topic": ""}') is None
+    assert agent.parse_proposal("not json") is None
+
+
+def test_search_finds_singular_for_plural_words(tmp_path):
+    conn = make_db(tmp_path)
+    assert [s.name for s in db.search_startups(conn, keyword="robotic hands")] == ["Linkerbot", "Mimic Robotics"]
+    assert db.keyword_stems("lidar sensors glass") == ["lidar", "sensor", "glass"]
+
+
 def test_ask_retries_empty_responses(tmp_path, monkeypatch):
     fake = FakeModel('{"keyword": "robot hand"}')
     real_create = fake.create

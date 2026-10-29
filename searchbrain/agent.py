@@ -32,7 +32,11 @@ Rules:
 - If the question only asks about a place or a founding year (no technology), search without keyword.
   Words like "startup", "company" or the general topic of the database are not keywords.
 - If a value (city, founding year) is unknown, say it is unknown. Do not guess.
-- Answer in the language of the question. Keep the answer short and use a list for several startups."""
+- If search_startups finds no matching startups or fewer than 3, call propose_web_search with a short
+  topic for the missing area and 2-3 subtopics. Then say briefly what the database has, and that the
+  user can start a web search with the card below. Never say that the web search already ran.
+- Always answer in English, even if the question is in another language.
+- Keep the answer short and use a list for several startups."""
 
 TOOLS = [
     {
@@ -61,7 +65,29 @@ TOOLS = [
                 },
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_web_search",
+            "description": (
+                "Suggest a new web search for startups in an area that is missing or thin in the database. "
+                "This does not search: the user sees a card and decides."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Short English topic, 2-4 words, e.g. 'lidar sensors'"},
+                    "subtopics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "2-3 more specific English subtopics, e.g. ['automotive lidar', 'solid-state lidar']",
+                    },
+                },
+                "required": ["topic"],
+            },
+        },
+    },
 ]
 
 
@@ -85,6 +111,20 @@ def _complete(messages: list[dict]):
 class Answer:
     text: str
     startups: list[Startup] = field(default_factory=list)  # everything the tool found, e.g. for a map
+    web_search: dict | None = None  # {"topic", "subtopics"} if the agent suggests searching the web
+
+
+def parse_proposal(arguments: str) -> dict | None:
+    """Check the agent's web search proposal: a short topic and at most 3 subtopics."""
+    try:
+        args = json.loads(arguments or "{}")
+    except json.JSONDecodeError:
+        return None
+    topic = str(args.get("topic") or "").strip()
+    if not topic or len(topic) > 60:
+        return None
+    subtopics = [str(s).strip() for s in args.get("subtopics") or [] if str(s).strip()][:3]
+    return {"topic": topic, "subtopics": subtopics}
 
 
 def _as_tool_result(startups: list[Startup]) -> str:
@@ -114,6 +154,7 @@ def ask(question: str, history: list[dict] | None = None, conn=None) -> Answer:
     history = history if history is not None else []
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history, {"role": "user", "content": question}]
     found: dict[str, Startup] = {}
+    proposal = None
 
     try:
         for _ in range(MAX_TOOL_ROUNDS + 1):
@@ -132,8 +173,16 @@ def ask(question: str, history: list[dict] | None = None, conn=None) -> Answer:
                 }
             )
             for call in message.tool_calls:
-                result, startups = run_tool(conn, call.function.name, call.function.arguments)
-                found.update({db.startup_key(s): s for s in startups})
+                if call.function.name == "propose_web_search":
+                    proposal = parse_proposal(call.function.arguments) or proposal
+                    result = json.dumps(
+                        {"status": "The card is shown to the user. The web search has NOT run yet."}
+                        if proposal
+                        else {"error": "invalid arguments: a short topic is required"}
+                    )
+                else:
+                    result, startups = run_tool(conn, call.function.name, call.function.arguments)
+                    found.update({db.startup_key(s): s for s in startups})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
         else:
             text = "Sorry, I searched too many times without an answer. Please ask more specifically."
@@ -142,7 +191,7 @@ def ask(question: str, history: list[dict] | None = None, conn=None) -> Answer:
         text = f"Sorry, the AI service did not answer ({type(error).__name__}). Please try again."
 
     history += [{"role": "user", "content": question}, {"role": "assistant", "content": text}]
-    return Answer(text=text, startups=list(found.values()))
+    return Answer(text=text, startups=list(found.values()), web_search=proposal)
 
 
 def main() -> None:

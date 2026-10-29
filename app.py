@@ -73,7 +73,7 @@ st.markdown(
 )
 
 YEARS = [0, *range(date.today().year, 1999, -1)]  # 0 = any year
-EMPTY_FILTERS = {"keyword": "", "countries": [], "since": 0, "located": False}
+EMPTY_FILTERS = {"area": "", "keyword": "", "countries": [], "since": 0, "located": False}
 SUGGESTIONS = [
     ("✋", "Robot hands in China", "Which startups build robot hands in China?"),
     ("🇪🇺", "Humanoids in Europe", "Which humanoid robotics startups are in Europe?"),
@@ -103,8 +103,10 @@ def current_filters() -> dict:
 
 
 def matches(startup: Startup, filters: dict) -> bool:
+    if filters["area"] and startup.topic != filters["area"]:
+        return False
     text = " ".join(filter(None, [startup.name, startup.description, startup.summary, startup.industry])).lower()
-    if any(word not in text for word in filters["keyword"].lower().split()):
+    if any(word not in text for word in db.keyword_stems(filters["keyword"])):
         return False
     if filters["countries"] and startup.country not in filters["countries"]:
         return False
@@ -117,6 +119,7 @@ def matches(startup: Startup, filters: dict) -> bool:
 
 def filter_summary(filters: dict) -> str:
     parts = [
+        f"area {filters['area']}" if filters["area"] else None,
         f"“{filters['keyword']}”" if filters["keyword"] else None,
         ", ".join(filters["countries"]) or None,
         f"founded {filters['since']}+" if filters["since"] else None,
@@ -199,6 +202,25 @@ def reset_filters() -> None:
         st.session_state[f"f_{key}"] = default
 
 
+def split_subtopics(text: str) -> list[str]:
+    return [s.strip() for s in text.split(",") if s.strip()][:3]
+
+
+def request_web_search(chat_id: int, index: int) -> None:
+    """The user confirmed the proposal card: the search runs in the next page run, inside the chat."""
+    topic = st.session_state.get(f"ws_topic_{chat_id}_{index}", "").strip()
+    if topic:
+        subtopics = split_subtopics(st.session_state.get(f"ws_subs_{chat_id}_{index}", ""))
+        st.session_state.run_search = {"chat_id": chat_id, "index": index, "topic": topic, "subtopics": subtopics}
+
+
+def dismiss_proposal(chat_id: int, index: int) -> None:
+    conn = db.connect()
+    chat = storage.get_chat(conn, chat_id)
+    chat["messages"][index]["web_search"]["status"] = "dismissed"
+    storage.save_messages(conn, chat_id, chat["messages"])
+
+
 # ---------- data and state ----------
 
 conn = db.connect()
@@ -209,15 +231,19 @@ created = db.created_times(conn)
 favorites = storage.favorite_keys(conn)
 scouts = storage.saved_searches(conn)
 countries_available = sorted({s.country for s in all_startups if s.country})
+areas_available = db.topics(conn)
 missing_keys = config.missing_keys()
 chat_disabled = "NVIDIA_API_KEY" in missing_keys
+search_disabled = bool(missing_keys)
 
 for key, value in {"view": "home", "chat_id": None, "pending_question": None, "scout": None, "scout_new": {}}.items():
     st.session_state.setdefault(key, value)
 for key, default in EMPTY_FILTERS.items():
     st.session_state.setdefault(f"f_{key}", default)
-# Countries that are no longer in the data cannot stay selected in the multiselect
+# Values that are no longer in the data cannot stay selected in the filter widgets
 st.session_state.f_countries = [c for c in st.session_state.f_countries if c in countries_available]
+if st.session_state.f_area not in areas_available:
+    st.session_state.f_area = ""
 
 
 def scout_new_keys(scout: dict) -> list[str]:
@@ -266,8 +292,12 @@ def startup_card(key: str, startup: Startup, prefix: str, is_new: bool = False) 
 with st.sidebar:
     st.markdown('<div class="brand">🧠 Searchbrain</div>', unsafe_allow_html=True)
     view = st.session_state.view
-    st.button("＋  New chat", key="nav_new_chat", on_click=new_chat, type="primary" if view == "home" else "secondary")
+    st.button("🏠  Home", key="nav_home", on_click=new_chat, type="primary" if view == "home" else "secondary")
+    for name, label_text in [("browse", "🔎  Browse startups"), ("charts", "📊  Charts"), ("favorites", "⭐  Favorites")]:
+        st.button(label_text, key=f"nav_{name}", on_click=go, args=(name,), type="primary" if view == name else "secondary")
+    st.button("＋  New chat", key="nav_new_chat", on_click=new_chat)
 
+    st.divider()
     label, plus = st.columns([5, 1])
     label.markdown('<div class="side-label">Scouts</div>', unsafe_allow_html=True)
     plus.button("＋", key="nav_add_scout", on_click=go, args=("browse",), help="Set filters in Browse, then save them as a Scout")
@@ -292,36 +322,43 @@ with st.sidebar:
         active = view == "chat" and st.session_state.chat_id == chat["id"]
         st.button(chat["title"], key=f"chat_{chat['id']}", on_click=open_chat, args=(chat["id"],), type="primary" if active else "secondary")
 
-    st.divider()
-    for name, label_text in [("browse", "🔎  Browse startups"), ("charts", "📊  Charts"), ("favorites", "⭐  Favorites")]:
-        st.button(label_text, key=f"nav_{name}", on_click=go, args=(name,), type="primary" if view == name else "secondary")
 
-    st.divider()
-    with st.expander("➕ Collect a new topic"):
-        topic = st.text_input("Topic", placeholder="e.g. humanoid robotics")
-        subtopics = st.text_input("Subtopics (comma separated)", placeholder="e.g. robot hand, actuator")
-        sub_list = [s.strip() for s in subtopics.split(",") if s.strip()]
-        st.caption(f"Uses {3 + len(sub_list)} Tavily searches (free credits) and takes several minutes.")
-        if st.button("Start collecting", key="collect_start", disabled=not topic.strip() or bool(missing_keys)):
-            with st.status(f"Collecting “{topic.strip()}” …", expanded=True) as status:
-                bar = st.progress(0.0, text="Searching the web …")
+# ---------- web search for a new area ----------
 
-                def show_progress(number: int, count: int, state: str) -> None:
-                    bar.progress(number / count, text=f"AI extraction: batch {number}/{count} ({state})")
 
-                try:
-                    report = collect(topic.strip(), sub_list, on_progress=show_progress)
-                except Exception as error:
-                    logger.exception("Collect from the web page failed")
-                    status.update(label=f"Collect failed: {type(error).__name__}", state="error")
-                else:
-                    failed = report["batches"]["failed"]
-                    st.session_state.last_collect = f"“{topic.strip()}”: {report['new']} new, {report['updated']} updated" + (
-                        f", {failed} batches failed (start again to retry)" if failed else ""
-                    )
-                    st.rerun()
-        if "last_collect" in st.session_state:
-            st.success(f"Last collect – {st.session_state.last_collect}")
+def run_web_search(topic: str, subtopics: list[str]) -> dict | None:
+    """Collect startups for a new area with a progress bar, then create a Scout for it.
+
+    Returns a small report, or None if the search failed.
+    """
+    with st.status(f"Searching the web for “{topic}” …", expanded=True) as status:
+        bar = st.progress(0.0, text="Searching the web …")
+
+        def show_progress(number: int, count: int, state: str) -> None:
+            bar.progress(number / count, text=f"AI extraction: batch {number} of {count} ({state})")
+
+        try:
+            report = collect(topic, subtopics, on_progress=show_progress)
+        except Exception as error:
+            logger.exception("Web search from the page failed")
+            status.update(label=f"Web search failed: {type(error).__name__}. Details are in logs/searchbrain.log", state="error")
+            return None
+        storage.save_search(conn, topic, {**EMPTY_FILTERS, "area": topic})
+        summary = {
+            "extracted": report["extracted"],
+            "new": report["new"],
+            "updated": report["updated"],
+            "failed_batches": report["batches"]["failed"],
+        }
+        status.update(label=f"Found {summary['extracted']} startups ({summary['new']} new) · Scout “{topic}” created", state="complete")
+        return summary
+
+
+def web_search_note(summary: dict) -> str:
+    text = f"{summary['extracted']} startups found ({summary['new']} new, {summary['updated']} already known)"
+    if summary.get("failed_batches"):
+        text += f" · {summary['failed_batches']} parts failed, search again later to fill them in"
+    return text
 
 
 # ---------- views ----------
@@ -334,7 +371,9 @@ def view_home() -> None:
     if missing_keys:
         st.warning(f"Missing in .env: {', '.join(missing_keys)}. Chat and collecting need these keys.")
     with st.container(key="home_input"):
-        question = st.chat_input("Ask Searchbrain…", key="home_question", disabled=chat_disabled)
+        question = st.chat_input(
+            "Ask Searchbrain… e.g. “Find startups in battery recycling”", key="home_question", disabled=chat_disabled
+        )
     if question:
         start_chat(question)
         st.rerun()
@@ -350,10 +389,17 @@ def view_home() -> None:
                 disabled=chat_disabled,
             )
 
-    on_map = sum(s.location_precision in ("city", "country") for s in all_startups)
-    section_label("🗺️  Where the startups are", f"{len(all_startups)} startups · {len(countries_available)} countries · {on_map} on the map")
+    section_label("🗺️  Where the startups are")
+    pills_col, stats_col = st.columns([3, 2], vertical_alignment="center")
+    area = None
+    if len(areas_available) > 1:
+        area = pills_col.pills("Area", ["All areas", *areas_available], default="All areas", key="home_area", label_visibility="collapsed")
+    shown = [s for s in all_startups if area in (None, "All areas") or s.topic == area]
+    on_map = sum(s.location_precision in ("city", "country") for s in shown)
+    countries = len({s.country for s in shown if s.country})
+    stats_col.caption(f"{len(shown)} startups · {countries} countries · {on_map} on the map")
     with st.container(border=True):
-        show_map(all_startups, key="home_map", height=480)
+        show_map(shown, key="home_map", height=480)
 
     section_label("◉  Your Scouts", "Saved searches that show what is new")
     cards = st.columns(4)
@@ -374,8 +420,35 @@ def view_home() -> None:
         st.button("Create", key="home_new_scout", on_click=go, args=("browse",))
 
 
+def proposal_card(chat_id: int, index: int, proposal: dict) -> None:
+    with st.container(border=True, key=f"proposal_{chat_id}_{index}"):
+        st.markdown("**🔍 Search the web for a new area?**")
+        if proposal.get("error"):
+            st.warning("The last web search failed. Details are in logs/searchbrain.log. You can try again.")
+        topic_col, subs_col = st.columns([2, 3])
+        topic_col.text_input("Area", value=proposal["topic"], key=f"ws_topic_{chat_id}_{index}")
+        subs_col.text_input(
+            "Subtopics (comma separated)", value=", ".join(proposal.get("subtopics", [])), key=f"ws_subs_{chat_id}_{index}"
+        )
+        searches = 3 + len(split_subtopics(st.session_state.get(f"ws_subs_{chat_id}_{index}", "")))
+        st.caption(f"About {searches} web searches (free Tavily credits) · takes a few minutes · creates a Scout for the area")
+        start, later, _ = st.columns([1.3, 1, 4])
+        start.button(
+            "Start search", key=f"ws_start_{chat_id}_{index}", type="primary",
+            on_click=request_web_search, args=(chat_id, index), disabled=search_disabled,
+        )
+        later.button("Not now", key=f"ws_later_{chat_id}_{index}", on_click=dismiss_proposal, args=(chat_id, index))
+
+
 def render_answer(chat_id: int, index: int, message: dict, latest: bool) -> None:
     st.markdown(message["content"])
+    proposal = message.get("web_search")
+    if proposal and proposal["status"] == "proposed" and latest:
+        proposal_card(chat_id, index, proposal)
+    elif proposal and proposal["status"] == "done":
+        note, open_col = st.columns([5, 1.3], vertical_alignment="center")
+        note.caption(f"✅ Web search for “{proposal['topic']}”: {web_search_note(proposal['report'])}")
+        open_col.button("Open Scout", key=f"ws_scout_{chat_id}_{index}", on_click=open_scout, args=(proposal["topic"], []))
     keys = [key for key in message.get("found", []) if key in by_key]
     if not keys:
         return
@@ -411,6 +484,20 @@ def view_chat() -> None:
         else:
             render_answer(chat["id"], index, message, latest=index == last_answer and not st.session_state.pending_question)
 
+    job = st.session_state.get("run_search")
+    if job and job["chat_id"] == chat["id"]:
+        st.session_state.run_search = None
+        summary = run_web_search(job["topic"], job["subtopics"])
+        proposal = messages[job["index"]]["web_search"]
+        if summary is None:
+            proposal.update(topic=job["topic"], subtopics=job["subtopics"], error=True)
+        else:
+            proposal.update(status="done", topic=job["topic"], subtopics=job["subtopics"], report=summary, error=False)
+            # Ask the original question again, now with the new startups in the database
+            st.session_state.pending_question = messages[job["index"] - 1]["content"]
+        storage.save_messages(conn, chat["id"], messages)
+        st.rerun()
+
     question = st.session_state.pending_question
     if question:
         with st.container(key=f"user_msg_{len(messages)}"):
@@ -419,7 +506,10 @@ def view_chat() -> None:
             history = [{"role": m["role"], "content": m["content"]} for m in messages]
             answer = agent.ask(question, history, conn)
         found = [key for s in answer.startups if (key := db.existing_key(conn, s))]
-        messages += [{"role": "user", "content": question}, {"role": "assistant", "content": answer.text, "found": found}]
+        reply = {"role": "assistant", "content": answer.text, "found": found}
+        if answer.web_search:
+            reply["web_search"] = {**answer.web_search, "status": "proposed"}
+        messages += [{"role": "user", "content": question}, reply]
         storage.save_messages(conn, chat["id"], messages)
         st.session_state.pending_question = None
         st.rerun()
@@ -462,11 +552,12 @@ def view_scout() -> None:
 
 def view_browse() -> None:
     st.markdown("### Browse startups")
-    columns = st.columns([3, 3, 2, 2])
-    columns[0].text_input("Search", key="f_keyword", placeholder="Name, description, industry …")
-    columns[1].multiselect("Countries", countries_available, key="f_countries", placeholder="All countries")
-    columns[2].selectbox("Founded in or after", YEARS, key="f_since", format_func=lambda y: "Any year" if y == 0 else str(y))
-    columns[3].checkbox("Only with location", key="f_located")
+    columns = st.columns([2.2, 3, 3, 2, 2], vertical_alignment="bottom")
+    columns[0].selectbox("Area", ["", *areas_available], key="f_area", format_func=lambda a: a or "All areas")
+    columns[1].text_input("Search", key="f_keyword", placeholder="Name, description, industry …")
+    columns[2].multiselect("Countries", countries_available, key="f_countries", placeholder="All countries")
+    columns[3].selectbox("Founded in or after", YEARS, key="f_since", format_func=lambda y: "Any year" if y == 0 else str(y))
+    columns[4].checkbox("Only with location", key="f_located")
 
     filters = current_filters()
     found = [(key, s) for key, s in records if matches(s, filters)]

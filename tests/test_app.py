@@ -1,5 +1,7 @@
 """Runs the Streamlit page with sample data and a fake agent (no API calls) and checks that it works."""
 
+from collections import Counter
+
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -59,6 +61,49 @@ def test_browse_filter_and_save_scout(app):
     assert not app.exception
     assert app.session_state.view == "scout"
     assert "1 startups · 0 new since your last visit" in page_text(app)
+
+
+def fake_collect(topic, subtopics=None, on_progress=None):
+    """Stands in for the real web search: stores one lidar startup."""
+    conn = db.connect()
+    status = db.upsert_startup(conn, Startup(name="Ouster", description="Digital lidar sensors", country="United States", topic=topic))
+    if on_progress:
+        on_progress(1, 1, "done")
+    return {"extracted": 1, "new": int(status == "new"), "updated": int(status == "updated"), "batches": Counter({"done": 1})}
+
+
+def test_chat_proposes_web_search_and_runs_it_after_confirm(app, monkeypatch):
+    from searchbrain import collect as collect_module
+
+    def ask_with_proposal(question, history=None, conn=None):
+        lidar = [s for s in db.search_startups(conn or db.connect(), keyword="lidar")]
+        if lidar:
+            return agent.Answer(text="Found Ouster.", startups=lidar)
+        return agent.Answer(text="No lidar startups yet.", web_search={"topic": "lidar sensors", "subtopics": ["automotive lidar"]})
+
+    monkeypatch.setattr(agent, "ask", ask_with_proposal)
+    monkeypatch.setattr(collect_module, "collect", fake_collect)
+
+    app.run()
+    app.chat_input(key="home_question").set_value("Which lidar companies exist?").run()
+    assert "No lidar startups yet." in page_text(app)
+    assert "Search the web for a new area?" in page_text(app)
+
+    chat_id = app.session_state.chat_id
+    app.button(key=f"ws_start_{chat_id}_1").click().run()
+    assert not app.exception
+    assert "Found Ouster." in page_text(app)  # the original question was asked again
+    assert "lidar sensors" in [s["name"] for s in storage.saved_searches(db.connect())]  # Scout created
+    messages = storage.get_chat(db.connect(), chat_id)["messages"]
+    assert messages[1]["web_search"]["status"] == "done"
+
+
+def test_home_button_returns_to_start_page(app):
+    app.run()
+    app.button(key="nav_browse").click().run()
+    app.button(key="nav_home").click().run()
+    assert app.session_state.view == "home"
+    assert "What are we looking for today?" in page_text(app)
 
 
 def test_scout_counts_new_startups(app):
