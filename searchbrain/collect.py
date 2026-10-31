@@ -11,8 +11,8 @@ import json
 import re
 from collections import Counter
 
-from searchbrain import db, llm
-from searchbrain.extract import extract_startups
+from searchbrain import db, llm, yc
+from searchbrain.extract import extract_startups, merge_duplicates
 from searchbrain.geocode import geocode_all
 from searchbrain.log import get_logger
 from searchbrain.models import Startup
@@ -66,15 +66,17 @@ def summarize(startups: list[Startup]) -> None:
             startup.summary = (summary or "").strip() or startup.description or None
 
 
-def collect(topic: str, subtopics: list[str] | None = None, on_progress=None) -> dict:
+def collect(topic: str, subtopics: list[str] | None = None, on_progress=None, sources: tuple[str, ...] = ("web",)) -> dict:
     """Run the whole collect step for one topic. Returns counts for the report.
 
+    sources: "web" (Tavily + AI extraction, takes minutes) and/or "yc" (Y Combinator list, takes seconds).
     on_progress(batch_number, batch_count, status) is passed on to the extraction.
     """
-    logger.info("Collect started: %s %s", topic, subtopics or "")
+    logger.info("Collect started: %s %s from %s", topic, subtopics or "", sources)
     conn = db.connect()
 
-    hits = search(topic_queries(topic, subtopics or []))
+    yc_startups = yc.find_startups(topic, subtopics) if "yc" in sources else []
+    hits = search(topic_queries(topic, subtopics or [])) if "web" in sources else []
     statuses = Counter()
 
     def track(number: int, count: int, status: str) -> None:
@@ -82,7 +84,9 @@ def collect(topic: str, subtopics: list[str] | None = None, on_progress=None) ->
         if on_progress:
             on_progress(number, count, status)
 
-    startups = extract_startups(hits, topic=topic, on_progress=track)
+    web_startups = extract_startups(hits, topic=topic, on_progress=track) if hits else []
+    # YC first: its data is checked by YC, so it wins when the same company is found on the web too
+    startups = merge_duplicates(yc_startups + web_startups)
     for startup in startups:
         fill_from_db(conn, startup)
     requests = geocode_all(conn, startups)
@@ -95,6 +99,7 @@ def collect(topic: str, subtopics: list[str] | None = None, on_progress=None) ->
     report = {
         "hits": len(hits),
         "batches": statuses,
+        "yc": len(yc_startups),
         "extracted": len(startups),
         "new": results["new"],
         "updated": results["updated"],
@@ -111,13 +116,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect startups for a topic and save them.")
     parser.add_argument("topic")
     parser.add_argument("--sub", action="append", default=[], help="extra subtopic, can be repeated")
+    parser.add_argument("--sources", default="web", help='comma separated: "web", "yc" or "web,yc" (default: web)')
     args = parser.parse_args()
+    sources = tuple(s.strip() for s in args.sources.split(",") if s.strip())
 
     def show(number: int, count: int, status: str) -> None:
         print(f"  extraction batch {number}/{count}: {status}")
 
     try:
-        report = collect(args.topic, args.sub, on_progress=show)
+        report = collect(args.topic, args.sub, on_progress=show, sources=sources)
     except Exception:
         logger.exception("Collect failed")
         print("Collect failed, see logs/searchbrain.log")
@@ -128,6 +135,7 @@ def main() -> None:
     print(f"Extraction batches: {dict(batches)}")
     if batches["failed"]:
         print(f"                    {batches['failed']} failed, run the same command again to retry only those")
+    print(f"YC companies:       {report['yc']}")
     print(f"Startups extracted: {report['extracted']} ({report['new']} new, {report['updated']} updated)")
     print(f"Location:           {dict(report['precision'])} ({report['geocode_requests']} Nominatim requests)")
     print(f"Startups in DB:     {report['total_in_db']}")

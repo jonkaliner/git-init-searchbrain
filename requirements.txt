@@ -1,5 +1,6 @@
 openai
 python-dotenv
+requests
 tavily-python
 google-genai
 streamlit

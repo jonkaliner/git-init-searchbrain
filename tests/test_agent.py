@@ -33,23 +33,40 @@ def test_run_tool_handles_bad_arguments(tmp_path):
     assert startups == []
 
 
+def as_stream(message):
+    """Send a model answer in pieces, like the streamed API: tool call arguments arrive in two parts."""
+    first, second = [], []
+    for i, call in enumerate(message.tool_calls or []):
+        half = len(call.function.arguments) // 2
+        first.append(SimpleNamespace(index=i, id=call.id, function=SimpleNamespace(name=call.function.name, arguments=call.function.arguments[:half])))
+        second.append(SimpleNamespace(index=i, id=None, function=SimpleNamespace(name=None, arguments=call.function.arguments[half:])))
+    return iter(
+        [
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=message.content, tool_calls=first or None))]),
+            SimpleNamespace(choices=[]),  # the API also sends chunks without choices
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=second or None))]),
+        ]
+    )
+
+
+def tool_call(call_id: str, name: str, arguments: str):
+    return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=arguments))
+
+
 class FakeModel:
     """First answer: a tool call. Second answer: the final text."""
 
     def __init__(self, tool_arguments: str):
         self.requests = []
         self.answers = [
-            SimpleNamespace(
-                content=None,
-                tool_calls=[SimpleNamespace(id="call_1", function=SimpleNamespace(name="search_startups", arguments=tool_arguments))],
-            ),
+            SimpleNamespace(content=None, tool_calls=[tool_call("call_1", "search_startups", tool_arguments)]),
             SimpleNamespace(content="Linkerbot (Beijing) builds hands. Source: https://a.com", tool_calls=None),
         ]
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, **kwargs):
         self.requests.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=self.answers.pop(0))])
+        return as_stream(self.answers.pop(0))
 
 
 def test_ask_runs_tool_and_returns_answer_with_found_startups(tmp_path, monkeypatch):
@@ -70,7 +87,7 @@ def test_ask_runs_tool_and_returns_answer_with_found_startups(tmp_path, monkeypa
 def test_ask_returns_web_search_proposal(tmp_path, monkeypatch):
     fake = FakeModel('{"keyword": "lidar"}')
     fake.answers[0].tool_calls.append(
-        SimpleNamespace(id="call_2", function=SimpleNamespace(name="propose_web_search", arguments='{"topic": "lidar sensors", "subtopics": ["automotive lidar"]}'))
+        tool_call("call_2", "propose_web_search", '{"topic": "lidar sensors", "subtopics": ["automotive lidar"]}')
     )
     fake.answers[1].content = "The database has no lidar startups yet. You can start a web search below."
     monkeypatch.setattr(agent.llm, "client", lambda: fake)
@@ -101,7 +118,7 @@ def test_ask_retries_empty_responses(tmp_path, monkeypatch):
     def sometimes_empty(**kwargs):
         calls["n"] += 1
         if calls["n"] == 1:  # first response has no choices, like the free tier sometimes sends
-            return SimpleNamespace(choices=None, model_extra={})
+            return iter([SimpleNamespace(choices=[])])
         return real_create(**kwargs)
 
     fake.chat.completions.create = sometimes_empty
@@ -110,6 +127,48 @@ def test_ask_retries_empty_responses(tmp_path, monkeypatch):
 
     answer = agent.ask("Robot hands?", conn=make_db(tmp_path))
     assert "Linkerbot" in answer.text
+
+
+def test_ask_with_show_matches_needs_no_third_model_call(tmp_path, monkeypatch):
+    fake = FakeModel('{"keyword": "robot"}')
+    fake.answers[1] = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            tool_call(
+                "call_2",
+                "show_matches",
+                '{"matches": [{"name": "Mimic Robotics", "score": 5, "why": "AI robotic hand."},'
+                ' {"name": "Made Up Robots", "score": 4, "why": "not in the results"},'
+                ' {"name": "Linkerbot", "score": 9, "why": "Dexterous hands."}]}',
+            )
+        ],
+    )
+    monkeypatch.setattr(agent.llm, "client", lambda: fake)
+    steps = []
+
+    answer = agent.ask("Robot hand startups?", conn=make_db(tmp_path), on_step=steps.append)
+
+    assert [(m["startup"].name, m["score"]) for m in answer.matches] == [("Mimic Robotics", 5), ("Linkerbot", 5)]  # made-up name dropped, score capped
+    assert answer.text == "I found 2 potential matches. The best fits are Mimic Robotics and Linkerbot."
+    assert len(fake.requests) == 2  # search + show_matches, no extra call for the final text
+    assert fake.requests[0]["stream"] is True
+    assert steps[0] == "Understanding the question …" and "ranking" in steps[1]
+
+
+def test_hanging_request_is_retried(tmp_path, monkeypatch):
+    fake = FakeModel('{"keyword": "robot hand"}')
+    real_create = fake.create
+    calls = {"n": 0}
+
+    def hangs_once(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("no answer within the stream timeout")
+        return real_create(**kwargs)
+
+    fake.chat.completions.create = hangs_once
+    monkeypatch.setattr(agent.llm, "client", lambda: fake)
+    assert "Linkerbot" in agent.ask("Robot hands?", conn=make_db(tmp_path)).text
 
 
 def test_ask_reports_service_errors(tmp_path, monkeypatch):

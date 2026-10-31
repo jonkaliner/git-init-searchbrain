@@ -1,6 +1,6 @@
 """Searchbrain web page, in the calm chat-first style of Harmonic Scout.
 
-Views: home (greeting, ask field, suggestions, world map, Scouts), chat, scout, browse, charts, favorites.
+Views: home (greeting, ask field, world map, Scouts), chat, scout, browse, charts, favorites.
 
 Start with:  .venv\\Scripts\\streamlit.exe run app.py
 """
@@ -37,7 +37,12 @@ st.markdown(
         justify-content: flex-start; padding: .28rem .6rem; min-height: 0; width: 100%;}
     [data-testid="stSidebar"] .stButton button:hover {background: #F3F4F6; color: #111827;}
     [data-testid="stSidebar"] .stButton button[kind="primary"] {background: #ECECEC; color: #111827;}
-    [data-testid="stSidebar"] .stButton button p {text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+    /* long chat titles must not push the sidebar content out to the left */
+    [data-testid="stSidebarContent"] {overflow-x: hidden;}
+    [data-testid="stSidebar"] .stButton, [data-testid="stSidebar"] .stButton button {max-width: 100%; min-width: 0; overflow: hidden;}
+    [data-testid="stSidebar"] .stButton button > div {width: 100%; min-width: 0; justify-content: flex-start;}
+    [data-testid="stSidebar"] .stButton button p {text-align: left; white-space: nowrap; overflow: hidden;
+                                                  text-overflow: ellipsis; margin: 0; min-width: 0;}
     .brand {font-weight: 600; font-size: 1.15rem; margin: 0 0 .8rem .6rem;}
     .side-label {color: #9CA3AF; font-size: .78rem; margin: .9rem 0 .1rem .6rem;}
 
@@ -49,11 +54,6 @@ st.markdown(
     [data-testid="stChatInput"] {background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 18px;
                                  box-shadow: 0 6px 24px rgba(17, 24, 39, .06);}
     .section-label {color: #6B7280; font-size: .92rem; margin: 2rem 0 .6rem; display: flex; justify-content: space-between;}
-    .st-key-suggestions .stButton button {
-        background: #EBEBEB; border: none; border-radius: 16px; min-height: 118px; width: 100%; color: #111827;
-        justify-content: flex-start; align-items: flex-end; padding: 1rem 1.1rem;}
-    .st-key-suggestions .stButton button:hover {background: #E2E2E2;}
-    .st-key-suggestions .stButton button p {text-align: left;}
 
     /* white rounded cards for every bordered container */
     [data-testid="stVerticalBlockBorderWrapper"] {background: #FFFFFF; border-radius: 16px;}
@@ -65,6 +65,8 @@ st.markdown(
                                     padding: .05rem .75rem; min-height: 0; font-size: .85rem;}
     .chat-header {color: #374151; font-weight: 500;}
     .muted {color: #9CA3AF; font-weight: 400;}
+    .badge-yc {background: #FFEDD5; color: #C2410C; border-radius: 6px; padding: .05rem .4rem;
+               font-size: .72rem; margin-left: .4rem;}
     .badge-new {background: #DBEAFE; color: #1D4ED8; border-radius: 6px; padding: .05rem .4rem;
                 font-size: .72rem; margin-left: .4rem;}
     </style>
@@ -73,12 +75,7 @@ st.markdown(
 )
 
 YEARS = [0, *range(date.today().year, 1999, -1)]  # 0 = any year
-EMPTY_FILTERS = {"area": "", "keyword": "", "countries": [], "since": 0, "located": False}
-SUGGESTIONS = [
-    ("✋", "Robot hands in China", "Which startups build robot hands in China?"),
-    ("🇪🇺", "Humanoids in Europe", "Which humanoid robotics startups are in Europe?"),
-    ("🌱", "Founded 2023 or later", "Which startups were founded in 2023 or later?"),
-]
+EMPTY_FILTERS = {"area": "", "keyword": "", "countries": [], "since": 0, "located": False, "yc": False}
 
 
 # ---------- helpers ----------
@@ -114,6 +111,8 @@ def matches(startup: Startup, filters: dict) -> bool:
         return False
     if filters["located"] and startup.location_precision not in ("city", "country"):
         return False
+    if filters["yc"] and not startup.yc_batch:
+        return False
     return True
 
 
@@ -124,6 +123,7 @@ def filter_summary(filters: dict) -> str:
         ", ".join(filters["countries"]) or None,
         f"founded {filters['since']}+" if filters["since"] else None,
         "with location" if filters["located"] else None,
+        "YC only" if filters["yc"] else None,
     ]
     return " · ".join(p for p in parts if p) or "all startups"
 
@@ -206,12 +206,16 @@ def split_subtopics(text: str) -> list[str]:
     return [s.strip() for s in text.split(",") if s.strip()][:3]
 
 
-def request_web_search(chat_id: int, index: int) -> None:
+def request_web_search(chat_id: int, index: int, yc_only: bool = False) -> None:
     """The user confirmed the proposal card: the search runs in the next page run, inside the chat."""
     topic = st.session_state.get(f"ws_topic_{chat_id}_{index}", "").strip()
     if topic:
         subtopics = split_subtopics(st.session_state.get(f"ws_subs_{chat_id}_{index}", ""))
-        st.session_state.run_search = {"chat_id": chat_id, "index": index, "topic": topic, "subtopics": subtopics}
+        if yc_only:
+            sources = ("yc",)
+        else:
+            sources = ("yc", "web") if st.session_state.get(f"ws_yc_{chat_id}_{index}", True) else ("web",)
+        st.session_state.run_search = {"chat_id": chat_id, "index": index, "topic": topic, "subtopics": subtopics, "sources": sources}
 
 
 def dismiss_proposal(chat_id: int, index: int) -> None:
@@ -262,7 +266,10 @@ def startup_dialog(key: str) -> None:
         return
     is_favorite = key in favorites
     st.subheader(startup.name)
-    st.caption(f"{md_escape(place(startup))} · founded {startup.founding_year or 'unknown'} · {md_escape(startup.industry or 'industry unknown')}")
+    yc_note = f" · Y Combinator {startup.yc_batch}" if startup.yc_batch else ""
+    st.caption(
+        f"{md_escape(place(startup))} · founded {startup.founding_year or 'unknown'}{yc_note} · {md_escape(startup.industry or 'industry unknown')}"
+    )
     st.markdown(md_escape(startup.summary or startup.description or "No description yet."))
     if startup.description and startup.summary and startup.description != startup.summary:
         with st.expander("Original description from the source"):
@@ -279,7 +286,8 @@ def startup_dialog(key: str) -> None:
 
 def startup_card(key: str, startup: Startup, prefix: str, is_new: bool = False) -> None:
     with st.container(border=True):
-        badge = '<span class="badge-new">New</span>' if is_new else ""
+        badge = f'<span class="badge-yc">YC {escape(startup.yc_batch)}</span>' if startup.yc_batch else ""
+        badge += '<span class="badge-new">New</span>' if is_new else ""
         star = " ⭐" if key in favorites else ""
         st.markdown(f"<b>{escape(startup.name)}</b>{star}{badge}", unsafe_allow_html=True)
         st.caption(f"{md_escape(place(startup))} · {startup.founding_year or 'year unknown'}")
@@ -326,25 +334,27 @@ with st.sidebar:
 # ---------- web search for a new area ----------
 
 
-def run_web_search(topic: str, subtopics: list[str]) -> dict | None:
+def run_web_search(topic: str, subtopics: list[str], sources: tuple[str, ...] = ("yc", "web")) -> dict | None:
     """Collect startups for a new area with a progress bar, then create a Scout for it.
 
     Returns a small report, or None if the search failed.
     """
-    with st.status(f"Searching the web for “{topic}” …", expanded=True) as status:
-        bar = st.progress(0.0, text="Searching the web …")
+    where = " and ".join({"yc": "Y Combinator", "web": "the web"}[s] for s in sources)
+    with st.status(f"Searching {where} for “{topic}” …", expanded=True) as status:
+        bar = st.progress(0.0, text="Searching the web …" if "web" in sources else "Searching the YC directory and placing startups on the map …")
 
         def show_progress(number: int, count: int, state: str) -> None:
             bar.progress(number / count, text=f"AI extraction: batch {number} of {count} ({state})")
 
         try:
-            report = collect(topic, subtopics, on_progress=show_progress)
+            report = collect(topic, subtopics, on_progress=show_progress, sources=sources)
         except Exception as error:
             logger.exception("Web search from the page failed")
             status.update(label=f"Web search failed: {type(error).__name__}. Details are in logs/searchbrain.log", state="error")
             return None
         storage.save_search(conn, topic, {**EMPTY_FILTERS, "area": topic})
         summary = {
+            "yc": report["yc"],
             "extracted": report["extracted"],
             "new": report["new"],
             "updated": report["updated"],
@@ -356,6 +366,8 @@ def run_web_search(topic: str, subtopics: list[str]) -> dict | None:
 
 def web_search_note(summary: dict) -> str:
     text = f"{summary['extracted']} startups found ({summary['new']} new, {summary['updated']} already known)"
+    if summary.get("yc"):
+        text += f" · {summary['yc']} of them from Y Combinator"
     if summary.get("failed_batches"):
         text += f" · {summary['failed_batches']} parts failed, search again later to fill them in"
     return text
@@ -377,17 +389,6 @@ def view_home() -> None:
     if question:
         start_chat(question)
         st.rerun()
-
-    section_label("💬  Ask Searchbrain anything")
-    with st.container(key="suggestions"):
-        for column, (index, (icon, title, question_text)) in zip(st.columns(3), enumerate(SUGGESTIONS)):
-            column.button(
-                f"{icon}  \n**{title}**  \n{question_text}",
-                key=f"suggest_{index}",
-                on_click=start_chat,
-                args=(question_text,),
-                disabled=chat_disabled,
-            )
 
     section_label("🗺️  Where the startups are")
     pills_col, stats_col = st.columns([3, 2], vertical_alignment="center")
@@ -430,14 +431,51 @@ def proposal_card(chat_id: int, index: int, proposal: dict) -> None:
         subs_col.text_input(
             "Subtopics (comma separated)", value=", ".join(proposal.get("subtopics", [])), key=f"ws_subs_{chat_id}_{index}"
         )
+        st.checkbox("Also search the Y Combinator directory (free, takes seconds)", value=True, key=f"ws_yc_{chat_id}_{index}")
         searches = 3 + len(split_subtopics(st.session_state.get(f"ws_subs_{chat_id}_{index}", "")))
         st.caption(f"About {searches} web searches (free Tavily credits) · takes a few minutes · creates a Scout for the area")
-        start, later, _ = st.columns([1.3, 1, 4])
+        start, yc_only, later, _ = st.columns([1.3, 1.6, 1, 2.5])
         start.button(
             "Start search", key=f"ws_start_{chat_id}_{index}", type="primary",
             on_click=request_web_search, args=(chat_id, index), disabled=search_disabled,
         )
+        yc_only.button(
+            "YC only (instant)", key=f"ws_yc_only_{chat_id}_{index}",
+            on_click=request_web_search, args=(chat_id, index, True), disabled="NOMINATIM_USER_AGENT" in missing_keys,
+        )
         later.button("Not now", key=f"ws_later_{chat_id}_{index}", on_click=dismiss_proposal, args=(chat_id, index))
+
+
+def md_link(label: str, url: str | None) -> str | None:
+    safe = safe_url(url)
+    return f"[{label}]({safe.replace(' ', '%20').replace(')', '%29')})" if safe else None
+
+
+def render_profiles(chat_id: int, index: int, matches: list[dict]) -> None:
+    """One profile per fitting startup, like the "Detailed Profiles" in Harmonic Scout."""
+    st.markdown(f"#### Potential matches ({len(matches)})")
+    for number, match in enumerate(matches, start=1):
+        startup = by_key[match["key"]]
+        head = st.columns([0.3, 3, 4], vertical_alignment="center")
+        head[0].markdown(f"**{number}.**")
+        head[1].button(startup.name, key=f"chip_{chat_id}_{index}_{match['key']}", on_click=show_startup, args=(match["key"],))
+        if match.get("score"):
+            head[2].markdown(f"— **Fit: {match['score']}/5** ⭐")
+
+        facts = [f"**Location:** {md_escape(place(startup))}", f"**Founded:** {startup.founding_year or 'unknown'}"]
+        if startup.yc_batch:
+            facts.append(f"**YC:** {startup.yc_batch}")
+        if startup.industry:
+            facts.append(f"**Industry:** {md_escape(startup.industry)}")
+        lines = [" · ".join(facts), f"**What they do:** {md_escape(startup.summary or startup.description or 'no description yet')}"]
+        if match.get("why"):
+            lines.append(f"**Why it fits:** {md_escape(match['why'])}")
+        links = " · ".join(filter(None, [md_link("Website", startup.link), md_link("Source", startup.source_url)]))
+        if links:
+            lines.append(links)
+        st.markdown("\n\n".join(lines))
+        if number < len(matches):
+            st.divider()
 
 
 def render_answer(chat_id: int, index: int, message: dict, latest: bool) -> None:
@@ -449,13 +487,20 @@ def render_answer(chat_id: int, index: int, message: dict, latest: bool) -> None
         note, open_col = st.columns([5, 1.3], vertical_alignment="center")
         note.caption(f"✅ Web search for “{proposal['topic']}”: {web_search_note(proposal['report'])}")
         open_col.button("Open Scout", key=f"ws_scout_{chat_id}_{index}", on_click=open_scout, args=(proposal["topic"], []))
-    keys = [key for key in message.get("found", []) if key in by_key]
-    if not keys:
-        return
-    st.caption("Found in the database")
-    for row_start in range(0, len(keys), 4):
-        for column, key in zip(st.columns(4), keys[row_start : row_start + 4]):
-            column.button(by_key[key].name, key=f"chip_{chat_id}_{index}_{key}", on_click=show_startup, args=(key,))
+
+    matches = [m for m in message.get("matches", []) if m.get("key") in by_key]
+    if matches:
+        render_profiles(chat_id, index, matches)
+        keys = [m["key"] for m in matches]
+    else:
+        # Answers from before the profiles existed: the startups as chips
+        keys = [key for key in message.get("found", []) if key in by_key]
+        if not keys:
+            return
+        st.caption("Found in the database")
+        for row_start in range(0, len(keys), 4):
+            for column, key in zip(st.columns(4), keys[row_start : row_start + 4]):
+                column.button(by_key[key].name, key=f"chip_{chat_id}_{index}_{key}", on_click=show_startup, args=(key,))
     located = [by_key[k] for k in keys if by_key[k].location_precision in ("city", "country")]
     if located:
         with st.expander(f"🗺️  Show {len(located)} of them on the map", expanded=latest):
@@ -487,7 +532,7 @@ def view_chat() -> None:
     job = st.session_state.get("run_search")
     if job and job["chat_id"] == chat["id"]:
         st.session_state.run_search = None
-        summary = run_web_search(job["topic"], job["subtopics"])
+        summary = run_web_search(job["topic"], job["subtopics"], job.get("sources", ("yc", "web")))
         proposal = messages[job["index"]]["web_search"]
         if summary is None:
             proposal.update(topic=job["topic"], subtopics=job["subtopics"], error=True)
@@ -502,11 +547,16 @@ def view_chat() -> None:
     if question:
         with st.container(key=f"user_msg_{len(messages)}"):
             st.markdown(md_escape(question))
-        with st.spinner("Searching the database …"):
+        with st.status("Searching the database …") as status:
             history = [{"role": m["role"], "content": m["content"]} for m in messages]
-            answer = agent.ask(question, history, conn)
+            answer = agent.ask(question, history, conn, on_step=lambda text: status.update(label=text))
+            status.update(label="Done", state="complete")
         found = [key for s in answer.startups if (key := db.existing_key(conn, s))]
         reply = {"role": "assistant", "content": answer.text, "found": found}
+        if answer.matches:
+            reply["matches"] = [
+                {"key": key, "score": m["score"], "why": m["why"]} for m in answer.matches if (key := db.existing_key(conn, m["startup"]))
+            ]
         if answer.web_search:
             reply["web_search"] = {**answer.web_search, "status": "proposed"}
         messages += [{"role": "user", "content": question}, reply]
@@ -558,6 +608,7 @@ def view_browse() -> None:
     columns[2].multiselect("Countries", countries_available, key="f_countries", placeholder="All countries")
     columns[3].selectbox("Founded in or after", YEARS, key="f_since", format_func=lambda y: "Any year" if y == 0 else str(y))
     columns[4].checkbox("Only with location", key="f_located")
+    columns[4].checkbox("Only YC companies", key="f_yc")
 
     filters = current_filters()
     found = [(key, s) for key, s in records if matches(s, filters)]
@@ -582,6 +633,7 @@ def view_browse() -> None:
                 "City": s.city,
                 "Country": s.country,
                 "Founded": s.founding_year,
+                "YC": s.yc_batch,
                 "Website": safe_url(s.link),
                 "Source": safe_url(s.source_url),
             }
@@ -665,7 +717,10 @@ def view_favorites() -> None:
 
 
 VIEWS = {"home": view_home, "chat": view_chat, "scout": view_scout, "browse": view_browse, "charts": view_charts, "favorites": view_favorites}
-VIEWS.get(st.session_state.view, view_home)()
+# st.empty() first replaces everything from the last page run, so e.g. the start page does not stay
+# visible (faded) while a chat answer is loading. Then the current view is drawn into that place.
+with st.empty().container():
+    VIEWS.get(st.session_state.view, view_home)()
 
 if detail := st.session_state.pop("detail", None):
     startup_dialog(detail)

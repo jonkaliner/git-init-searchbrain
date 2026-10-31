@@ -34,7 +34,9 @@ def _link(url: str | None, label: str) -> str:
 
 def _popup_html(startup: Startup) -> str:
     details = " · ".join(
-        escape(str(part)) for part in [startup.industry, startup.city, startup.country, startup.founding_year] if part
+        escape(str(part))
+        for part in [startup.industry, startup.city, startup.country, startup.founding_year, startup.yc_batch and f"YC {startup.yc_batch}"]
+        if part
     )
     links = " | ".join(filter(None, [_link(startup.link, "Website"), _link(startup.source_url, "Source")]))
     text = escape(startup.summary or startup.description or "")

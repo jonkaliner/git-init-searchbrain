@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS startups (
     longitude REAL,
     location_precision TEXT,
     topic TEXT,
+    yc_batch TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -78,6 +79,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     _add_column(conn, "saved_searches", "last_seen_at", "TEXT")
+    _add_column(conn, "startups", "yc_batch", "TEXT")
     _add_name_key_column(conn)
     return conn
 

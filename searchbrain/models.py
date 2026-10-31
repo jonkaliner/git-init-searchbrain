@@ -19,3 +19,4 @@ class Startup:
     # "city", "country" or "none" after geocoding; None means not geocoded yet
     location_precision: str | None = None
     topic: str | None = None
+    yc_batch: str | None = None  # e.g. "W24" for Y Combinator Winter 2024, None if not a YC company
