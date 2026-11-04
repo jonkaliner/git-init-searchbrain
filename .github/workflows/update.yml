@@ -1,0 +1,102 @@
+name: Update
+
+# Every Monday: refresh the Y Combinator list and the accelerator feeds, search every saved Scout again,
+# save the new database and publish the website.
+# By hand ("Run workflow" in the Actions tab): build one new deal flow from a request, or delete a Scout.
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Monday 05:00 UTC
+  workflow_dispatch:
+    inputs:
+      request:
+        description: 'Build a deal flow for ... (runs only this request and saves it as a Scout). Empty = the normal weekly update'
+        required: false
+        type: string
+      remove:
+        description: "Delete the Scout with this id (the ids are in docs/data/scouts.json)"
+        required: false
+        type: string
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency: # never two updates at the same time: both would change the same database file
+      group: searchbrain-update
+      cancel-in-progress: false
+    permissions:
+      contents: write # to commit the new database and the website data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13" # CrewAI does not support newer Python versions yet
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Check the secrets
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: |
+          if [ -z "$NVIDIA_API_KEY" ]; then
+            echo "::error::The secret NVIDIA_API_KEY is missing. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Update
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }} # optional: backup web search when DuckDuckGo refuses
+          NOMINATIM_USER_AGENT: "searchbrain/0.1 (https://github.com/${{ github.repository }})"
+          PYTHONUTF8: "1"
+          # inputs go through environment variables, never straight into the script text
+          REQUEST: ${{ inputs.request }}
+          REMOVE: ${{ inputs.remove }}
+        run: |
+          args=()
+          if [ -n "$REQUEST" ]; then args+=(--request "$REQUEST"); fi
+          if [ -n "$REMOVE" ]; then args+=(--remove "$REMOVE"); fi
+          python -m searchbrain.update "${args[@]}"
+
+      - name: Save the new data
+        if: always() # also after a partly failed update: what worked is kept
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "searchbrain-bot"
+          git config user.email "searchbrain-bot@users.noreply.github.com"
+          git add data/searchbrain.db docs/data
+          if git diff --cached --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "Update data $(date -u +%F)"
+            git pull --rebase origin "$BRANCH"
+            git push origin "HEAD:$BRANCH"
+          fi
+
+  deploy:
+    needs: update
+    if: always() && needs.update.result != 'cancelled'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }} # the commit that the update just pushed
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
