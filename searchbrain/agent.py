@@ -11,6 +11,7 @@ Run with:  .venv\\Scripts\\python.exe -m searchbrain.agent
 """
 
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -35,6 +36,7 @@ Rules:
   The page then shows a profile for each (location, founding year, YC batch, summary, links).
 - Your final text answer is then only 1-2 sentences, e.g. "I found 6 potential matches. The best fits
   are Proception and Nori." Do not list the startups or their details again.
+- Search the database at most 3 times per question.
 - If nothing is found, you may search once more with fewer or broader words.
   If there is still nothing, say that the database has no matching startups.
 - For regions like Europe or Asia, pass the list of countries in that region.
@@ -43,9 +45,15 @@ Rules:
 - If a value (city, founding year) is unknown, say it is unknown. Do not guess.
 - "yc_batch" (e.g. "W24") means the startup was in Y Combinator, Winter 2024. Mention it as "YC W24".
   It is not the founding year.
+- "backed_by" names programs: "Y Combinator" means the startup was in YC. Other names mean the startup
+  was found on that accelerator's or incubator's website, which is a lead, not proof that it took part.
 - If search_startups finds no matching startups or fewer than 3, call propose_web_search with a short
   topic for the missing area and 2-3 subtopics. Then say briefly what the database has, and that the
-  user can start a web search with the card below. Never say that the web search already ran.
+  user can start a search with the card below. Never say that the search already ran.
+- If the user asks to build a deal flow, to find new or more startups, or to search again, always call
+  propose_web_search, also when the database already has matches (then call show_matches as well).
+  Use the user's thesis as topic, e.g. "autonomous driving AI chips", and the details (stage, region,
+  technology) to rate the matches.
 - Always answer in English, even if the question is in another language."""
 
 TOOLS = [
@@ -107,7 +115,8 @@ TOOLS = [
         "function": {
             "name": "propose_web_search",
             "description": (
-                "Suggest a new web search for startups in an area that is missing or thin in the database. "
+                "Suggest a new search (deal flow) for startups in an area: in the Y Combinator directory, on the "
+                "websites of 99 accelerators and incubators, and on the web. "
                 "This does not search: the user sees a card and decides."
             ),
             "parameters": {
@@ -117,7 +126,10 @@ TOOLS = [
                     "subtopics": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "2-3 more specific English subtopics, e.g. ['automotive lidar', 'solid-state lidar']",
+                        "description": (
+                            "2-3 more specific English technologies or products to search for, e.g. "
+                            "['automotive lidar', 'solid-state lidar']. Not stage, region or year."
+                        ),
                     },
                 },
                 "required": ["topic"],
@@ -150,8 +162,8 @@ def _read_stream(stream) -> SimpleNamespace | None:
                 call["name"] += part.function.name
             if part.function and part.function.arguments:
                 call["arguments"] += part.function.arguments
-    if not got_choices:
-        return None
+    if not got_choices or (not "".join(content).strip() and not calls):
+        return None  # nothing usable: no text and no tool call
     tool_calls = [
         SimpleNamespace(id=c["id"] or f"call_{i}", function=SimpleNamespace(name=c["name"], arguments=c["arguments"]))
         for i, c in sorted(calls.items())
@@ -234,7 +246,7 @@ def parse_proposal(arguments: str) -> dict | None:
 
 def _as_tool_result(startups: list[Startup]) -> str:
     """Compact JSON for the model: only the fields it needs to answer."""
-    keep = ["name", "summary", "industry", "city", "country", "founding_year", "yc_batch"]
+    keep = ["name", "summary", "industry", "city", "country", "founding_year", "yc_batch", "backed_by"]
     rows = [{k: v for k, v in vars(s).items() if k in keep and v not in (None, "")} for s in startups]
     for row in rows:  # shorter input = faster answers; the page shows the full text in the profile
         if len(row.get("summary", "")) > 220:
@@ -254,6 +266,38 @@ def run_tool(conn, name: str, arguments: str) -> tuple[str, list[Startup]]:
         logger.error("Bad tool call %s(%s): %s", name, arguments, error)
         return json.dumps({"error": f"invalid arguments: {error}"}), []
     return _as_tool_result(startups), startups
+
+
+MAX_DB_SEARCHES = 3
+
+
+SEARCH_REQUEST = re.compile(r"\b(deal ?flow|find|search|look(ing)? for|discover|scout)\b", re.IGNORECASE)
+
+
+def topic_from_question(question: str) -> str | None:
+    """ "Build a deal flow for autonomous driving AI chip startups, early stage" -> "autonomous driving AI chip".
+
+    Only for clear search requests; used when the model gives no usable answer.
+    """
+    if not SEARCH_REQUEST.search(question):
+        return None
+    text = question.split(",")[0].split(".")[0]
+    text = re.sub(r"^.*?\b(deal ?flow|find|search|look(ing)? for|discover|scout)\b(\s+(for|me|new|more|some))*\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(startups?|compan(y|ies)|firms?|in the area of|related to)\b", " ", text, flags=re.IGNORECASE)
+    topic = " ".join(text.split()).strip(" -:")
+    topic = re.sub(r"^((in|for|on|of|about|around|within|working on|building)\s+)+", "", topic, flags=re.IGNORECASE)
+    return topic[:60] or None
+
+
+def fallback_proposal(keywords: list[str], question: str = "") -> dict | None:
+    """A deal flow card from the words the model searched for (or from the question), when the model
+    did not suggest one itself."""
+    unique = list(dict.fromkeys(k.strip() for k in keywords if k and k.strip()))
+    if not unique and (topic := topic_from_question(question)):
+        unique = [topic]
+    if not unique:
+        return None
+    return {"topic": unique[0][:60], "subtopics": [k[:60] for k in unique[1:3]]}
 
 
 def summary_sentence(matches: list[dict]) -> str:
@@ -276,6 +320,9 @@ def ask(question: str, history: list[dict] | None = None, conn=None, on_step=Non
     found: dict[str, Startup] = {}
     proposal = None
     matches: list[dict] = []
+    keywords: list[str] = []  # what the model searched for, for the fallback deal flow card
+    db_searches = 0
+    exhausted = False
 
     try:
         step("Understanding the question …")
@@ -309,20 +356,44 @@ def ask(question: str, history: list[dict] | None = None, conn=None, on_step=Non
                         if matches
                         else {"error": "no valid matches: use exact names from the search results"}
                     )
+                elif db_searches >= MAX_DB_SEARCHES:
+                    result = json.dumps(
+                        {"error": "Search limit reached, do not search again. Call show_matches with the fitting startups "
+                                  "from the earlier results, or propose_web_search if none fit."}
+                    )
                 else:
+                    db_searches += 1
+                    try:
+                        keywords.append(str(json.loads(call.function.arguments or "{}").get("keyword") or ""))
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
                     result, startups = run_tool(conn, call.function.name, call.function.arguments)
                     found.update({db.startup_key(s): s for s in startups})
-                    step(f"Found {len(found)} startups in the database, ranking the matches …")
+                    step(
+                        f"Found {len(found)} startups in the database, ranking the matches …"
+                        if startups
+                        else "Nothing fitting yet, trying other search words …"
+                    )
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             if matches:
                 # The profiles say everything: write the short answer here instead of asking the model again
                 text = (message.content or "").strip() or summary_sentence(matches)
                 break
         else:
+            exhausted = True
             text = "Sorry, I searched too many times without an answer. Please ask more specifically."
     except Exception as error:
         logger.exception("Chat request failed")
+        exhausted = True
         text = f"Sorry, the AI service did not answer ({type(error).__name__}). Please try again."
+
+    # Safety net: the model sometimes keeps searching, or gives up, instead of suggesting a deal flow
+    if not matches and not proposal and (exhausted or not found):
+        proposal = fallback_proposal(keywords, question)
+        if proposal:
+            exhausted = True
+    if proposal and exhausted and not matches:
+        text = "The database has no fitting startups for this yet. You can build a deal flow with the card below."
 
     history += [{"role": "user", "content": question}, {"role": "assistant", "content": text}]
     return Answer(text=text, startups=list(found.values()), web_search=proposal, matches=matches)

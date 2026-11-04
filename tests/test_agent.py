@@ -155,6 +155,43 @@ def test_ask_with_show_matches_needs_no_third_model_call(tmp_path, monkeypatch):
     assert steps[0] == "Understanding the question …" and "ranking" in steps[1]
 
 
+def test_endless_searching_ends_with_a_deal_flow_card(tmp_path, monkeypatch):
+    fake = FakeModel('{"keyword": "autonomous driving AI chip"}')
+    fake.answers = [
+        SimpleNamespace(content=None, tool_calls=[tool_call(f"call_{i}", "search_startups", f'{{"keyword": "{word}"}}')])
+        for i, word in enumerate(["autonomous driving AI chip", "AI chip", "autonomous driving", "chip", "AI chip"])
+    ]
+    monkeypatch.setattr(agent.llm, "client", lambda: fake)
+    steps = []
+
+    answer = agent.ask("Build a deal flow for autonomous driving AI chip startups", conn=make_db(tmp_path), on_step=steps.append)
+
+    assert answer.web_search == {"topic": "autonomous driving AI chip", "subtopics": ["AI chip", "autonomous driving"]}
+    assert "deal flow" in answer.text
+    assert "Search limit reached" in fake.requests[-1]["messages"][-1]["content"]  # 4th and 5th search were refused
+    assert "Nothing fitting yet" in steps[1]
+
+
+def test_topic_from_question():
+    question = "Build a deal flow for autonomous driving AI chip startups, early stage, Europe or US"
+    assert agent.topic_from_question(question) == "autonomous driving AI chip"
+    assert agent.topic_from_question("Find startups in battery recycling") == "battery recycling"
+    assert agent.topic_from_question("I am looking for companies related to lidar sensors") == "lidar sensors"
+    assert agent.topic_from_question("Which startups are in Berlin?") is None  # a question, not a search request
+
+
+def test_deal_flow_card_from_question_when_the_model_gives_nothing(tmp_path, monkeypatch):
+    def empty_answers(**kwargs):
+        return iter([SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="", tool_calls=None))])])
+
+    monkeypatch.setattr(agent.llm, "client", lambda: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=empty_answers))))
+    monkeypatch.setattr(agent.time, "sleep", lambda seconds: None)
+
+    answer = agent.ask("Build a deal flow for autonomous driving AI chip startups", conn=make_db(tmp_path))
+    assert answer.web_search == {"topic": "autonomous driving AI chip", "subtopics": []}
+    assert "card below" in answer.text
+
+
 def test_hanging_request_is_retried(tmp_path, monkeypatch):
     fake = FakeModel('{"keyword": "robot hand"}')
     real_create = fake.create

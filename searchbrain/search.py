@@ -34,8 +34,11 @@ def build_queries(keyword: str = "", industry: str = "", country: str = "", sinc
     ]
 
 
-def _cache_key(query: str, max_results: int) -> str:
-    return hashlib.sha256(f"{query.lower().strip()}|{max_results}".encode()).hexdigest()[:16]
+def _cache_key(query: str, max_results: int, include_domains: list[str] | None = None) -> str:
+    text = f"{query.lower().strip()}|{max_results}"
+    if include_domains:  # only then, so cache entries from before keep their keys
+        text += "|" + ",".join(sorted(include_domains))
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def _load_cache() -> dict:
@@ -49,20 +52,24 @@ def _save_cache(cache: dict) -> None:
     CACHE_FILE.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def search(queries: list[str], max_results: int = 10) -> list[SearchHit]:
-    """Run each query on Tavily (or read it from the cache) and return unique hits."""
+def search(queries: list[str], max_results: int = 10, include_domains: list[str] | None = None) -> list[SearchHit]:
+    """Run each query on Tavily (or read it from the cache) and return unique hits.
+
+    include_domains limits the search to these websites, e.g. accelerator portfolio pages.
+    """
     cache = _load_cache()
     client = None
     hits: dict[str, SearchHit] = {}
 
     for query in queries:
-        key = _cache_key(query, max_results)
+        key = _cache_key(query, max_results, include_domains)
         if key not in cache:
             if client is None:
                 from tavily import TavilyClient
 
                 client = TavilyClient(api_key=config.get("TAVILY_API_KEY"))
-            response = client.search(query, max_results=max_results)
+            options = {"include_domains": include_domains} if include_domains else {}
+            response = client.search(query, max_results=max_results, **options)
             cache[key] = {"query": query, "results": response.get("results", [])}
             _save_cache(cache)
 

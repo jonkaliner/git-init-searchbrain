@@ -15,7 +15,7 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from searchbrain import agent, config, db, storage
-from searchbrain.collect import collect
+from searchbrain.collect import collect, program_search_count
 from searchbrain.log import get_logger
 from searchbrain.models import Startup
 from searchbrain.worldmap import build_map, safe_url
@@ -76,6 +76,8 @@ st.markdown(
 
 YEARS = [0, *range(date.today().year, 1999, -1)]  # 0 = any year
 EMPTY_FILTERS = {"area": "", "keyword": "", "countries": [], "since": 0, "located": False, "yc": False}
+# Where a deal flow search can look, in this order (see collect.collect)
+SOURCES = {"yc": "Y Combinator", "programs": "99 accelerators & incubators", "web": "the whole web"}
 
 
 # ---------- helpers ----------
@@ -214,7 +216,9 @@ def request_web_search(chat_id: int, index: int, yc_only: bool = False) -> None:
         if yc_only:
             sources = ("yc",)
         else:
-            sources = ("yc", "web") if st.session_state.get(f"ws_yc_{chat_id}_{index}", True) else ("web",)
+            sources = tuple(s for s in SOURCES if st.session_state.get(f"ws_src_{s}_{chat_id}_{index}", True))
+            if not sources:
+                return
         st.session_state.run_search = {"chat_id": chat_id, "index": index, "topic": topic, "subtopics": subtopics, "sources": sources}
 
 
@@ -270,6 +274,8 @@ def startup_dialog(key: str) -> None:
     st.caption(
         f"{md_escape(place(startup))} · founded {startup.founding_year or 'unknown'}{yc_note} · {md_escape(startup.industry or 'industry unknown')}"
     )
+    if program_text := programs_line(startup):
+        st.markdown(program_text)
     st.markdown(md_escape(startup.summary or startup.description or "No description yet."))
     if startup.description and startup.summary and startup.description != startup.summary:
         with st.expander("Original description from the source"):
@@ -334,14 +340,15 @@ with st.sidebar:
 # ---------- web search for a new area ----------
 
 
-def run_web_search(topic: str, subtopics: list[str], sources: tuple[str, ...] = ("yc", "web")) -> dict | None:
-    """Collect startups for a new area with a progress bar, then create a Scout for it.
+def run_web_search(topic: str, subtopics: list[str], sources: tuple[str, ...] = ("yc", "programs", "web")) -> dict | None:
+    """Collect startups for a new area (deal flow) with a progress bar, then create a Scout for it.
 
     Returns a small report, or None if the search failed.
     """
-    where = " and ".join({"yc": "Y Combinator", "web": "the web"}[s] for s in sources)
+    where = ", ".join(SOURCES[s] for s in sources)
+    needs_web = "web" in sources or "programs" in sources
     with st.status(f"Searching {where} for “{topic}” …", expanded=True) as status:
-        bar = st.progress(0.0, text="Searching the web …" if "web" in sources else "Searching the YC directory and placing startups on the map …")
+        bar = st.progress(0.0, text="Searching the web …" if needs_web else "Searching the YC directory and placing startups on the map …")
 
         def show_progress(number: int, count: int, state: str) -> None:
             bar.progress(number / count, text=f"AI extraction: batch {number} of {count} ({state})")
@@ -355,6 +362,7 @@ def run_web_search(topic: str, subtopics: list[str], sources: tuple[str, ...] = 
         storage.save_search(conn, topic, {**EMPTY_FILTERS, "area": topic})
         summary = {
             "yc": report["yc"],
+            "from_programs": report.get("from_programs", 0),
             "extracted": report["extracted"],
             "new": report["new"],
             "updated": report["updated"],
@@ -367,7 +375,9 @@ def run_web_search(topic: str, subtopics: list[str], sources: tuple[str, ...] = 
 def web_search_note(summary: dict) -> str:
     text = f"{summary['extracted']} startups found ({summary['new']} new, {summary['updated']} already known)"
     if summary.get("yc"):
-        text += f" · {summary['yc']} of them from Y Combinator"
+        text += f" · {summary['yc']} from Y Combinator"
+    if summary.get("from_programs"):
+        text += f" · {summary['from_programs']} found via accelerator & incubator websites"
     if summary.get("failed_batches"):
         text += f" · {summary['failed_batches']} parts failed, search again later to fill them in"
     return text
@@ -423,17 +433,22 @@ def view_home() -> None:
 
 def proposal_card(chat_id: int, index: int, proposal: dict) -> None:
     with st.container(border=True, key=f"proposal_{chat_id}_{index}"):
-        st.markdown("**🔍 Search the web for a new area?**")
+        st.markdown("**🔍 Build a deal flow for this area?**")
         if proposal.get("error"):
-            st.warning("The last web search failed. Details are in logs/searchbrain.log. You can try again.")
+            st.warning("The last search failed. Details are in logs/searchbrain.log. You can try again.")
         topic_col, subs_col = st.columns([2, 3])
         topic_col.text_input("Area", value=proposal["topic"], key=f"ws_topic_{chat_id}_{index}")
         subs_col.text_input(
             "Subtopics (comma separated)", value=", ".join(proposal.get("subtopics", [])), key=f"ws_subs_{chat_id}_{index}"
         )
-        st.checkbox("Also search the Y Combinator directory (free, takes seconds)", value=True, key=f"ws_yc_{chat_id}_{index}")
-        searches = 3 + len(split_subtopics(st.session_state.get(f"ws_subs_{chat_id}_{index}", "")))
-        st.caption(f"About {searches} web searches (free Tavily credits) · takes a few minutes · creates a Scout for the area")
+        st.caption("Search in")
+        for column, (source, label) in zip(st.columns(3), SOURCES.items()):
+            column.checkbox(label, value=True, key=f"ws_src_{source}_{chat_id}_{index}")
+        subtopics = split_subtopics(st.session_state.get(f"ws_subs_{chat_id}_{index}", ""))
+        chosen = [s for s in SOURCES if st.session_state.get(f"ws_src_{s}_{chat_id}_{index}", True)]
+        searches = (3 + len(subtopics) if "web" in chosen else 0) + (program_search_count(subtopics) if "programs" in chosen else 0)
+        cost = f"about {searches} web searches (free Tavily credits) · takes a few minutes" if searches else "takes seconds"
+        st.caption(f"{cost.capitalize()} · creates a Scout for the area · the matches are rated against your message")
         start, yc_only, later, _ = st.columns([1.3, 1.6, 1, 2.5])
         start.button(
             "Start search", key=f"ws_start_{chat_id}_{index}", type="primary",
@@ -444,6 +459,18 @@ def proposal_card(chat_id: int, index: int, proposal: dict) -> None:
             on_click=request_web_search, args=(chat_id, index, True), disabled="NOMINATIM_USER_AGENT" in missing_keys,
         )
         later.button("Not now", key=f"ws_later_{chat_id}_{index}", on_click=dismiss_proposal, args=(chat_id, index))
+
+
+def programs_line(startup: Startup) -> str | None:
+    """ "Backed by" only for Y Combinator (confirmed); other programs are where the startup was found."""
+    names = [n.strip() for n in (startup.backed_by or "").split(";") if n.strip()]
+    parts = []
+    if "Y Combinator" in names:
+        parts.append("**Backed by:** Y Combinator")
+    others = [md_escape(n) for n in names if n != "Y Combinator"]
+    if others:
+        parts.append(f"**Found via:** {', '.join(others)} website")
+    return " · ".join(parts) or None
 
 
 def md_link(label: str, url: str | None) -> str | None:
@@ -460,14 +487,17 @@ def render_profiles(chat_id: int, index: int, matches: list[dict]) -> None:
         head[0].markdown(f"**{number}.**")
         head[1].button(startup.name, key=f"chip_{chat_id}_{index}_{match['key']}", on_click=show_startup, args=(match["key"],))
         if match.get("score"):
-            head[2].markdown(f"— **Fit: {match['score']}/5** ⭐")
+            head[2].markdown(f"— **Fit: {match['score']}/5** {'★' * match['score']}{'☆' * (5 - match['score'])}")
 
         facts = [f"**Location:** {md_escape(place(startup))}", f"**Founded:** {startup.founding_year or 'unknown'}"]
         if startup.yc_batch:
             facts.append(f"**YC:** {startup.yc_batch}")
         if startup.industry:
             facts.append(f"**Industry:** {md_escape(startup.industry)}")
-        lines = [" · ".join(facts), f"**What they do:** {md_escape(startup.summary or startup.description or 'no description yet')}"]
+        lines = [" · ".join(facts)]
+        if program_text := programs_line(startup):
+            lines.append(program_text)
+        lines += [f"**What they do:** {md_escape(startup.summary or startup.description or 'no description yet')}"]
         if match.get("why"):
             lines.append(f"**Why it fits:** {md_escape(match['why'])}")
         links = " · ".join(filter(None, [md_link("Website", startup.link), md_link("Source", startup.source_url)]))
@@ -485,7 +515,7 @@ def render_answer(chat_id: int, index: int, message: dict, latest: bool) -> None
         proposal_card(chat_id, index, proposal)
     elif proposal and proposal["status"] == "done":
         note, open_col = st.columns([5, 1.3], vertical_alignment="center")
-        note.caption(f"✅ Web search for “{proposal['topic']}”: {web_search_note(proposal['report'])}")
+        note.caption(f"✅ Deal flow search for “{proposal['topic']}”: {web_search_note(proposal['report'])}")
         open_col.button("Open Scout", key=f"ws_scout_{chat_id}_{index}", on_click=open_scout, args=(proposal["topic"], []))
 
     matches = [m for m in message.get("matches", []) if m.get("key") in by_key]
@@ -634,6 +664,7 @@ def view_browse() -> None:
                 "Country": s.country,
                 "Founded": s.founding_year,
                 "YC": s.yc_batch,
+                "Program": s.backed_by,
                 "Website": safe_url(s.link),
                 "Source": safe_url(s.source_url),
             }

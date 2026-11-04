@@ -1,0 +1,101 @@
+id,name,type,city,country,region,focus,website
+1,Y Combinator,Accelerator,San Francisco,US,North America,General,ycombinator.com
+2,Techstars,Accelerator,Boulder,US,North America,General; Corporate programs,techstars.com
+3,500 Global,Accelerator + VC,San Francisco,US,North America,General,500.co
+4,Plug and Play Tech Center,Corporate Accelerator,Sunnyvale,US,North America,General; Corporate Innovation,plugandplaytechcenter.com
+5,Antler,Venture Builder,Singapore,SG,Asia-Pacific,General; Day-zero investor,antler.co
+6,Entrepreneur First,Talent Investor,London,GB,Europe,Deep Tech; AI,joinef.com
+7,Seedcamp,Accelerator + VC,London,GB,Europe,General,seedcamp.com
+8,Station F,Campus,Paris,FR,Europe,General,stationf.co
+9,SOSV,Accelerator network,Princeton,US,North America,Deep Tech; Bio; Hardware,sosv.com
+10,HAX,Hardware Accelerator,Newark,US,North America,Hardware; Robotics,hax.co
+11,IndieBio,Biotech Accelerator,San Francisco,US,North America,Biotech; Food Tech,indiebio.co
+12,Alchemist Accelerator,Accelerator,San Jose,US,North America,Enterprise; B2B,alchemistaccelerator.com
+13,Capital Factory,Accelerator,Austin,US,North America,General; Defense,capitalfactory.com
+14,Google for Startups Accelerator,Corporate Accelerator,Mountain View,US,North America,AI; Cloud,startup.google.com
+15,NVIDIA Inception,Corporate program,Santa Clara,US,North America,AI; Deep Learning,nvidia.com
+16,Microsoft for Startups,Corporate program,Redmond,US,North America,B2B; AI,startups.microsoft.com
+17,Creative Destruction Lab,University Program,Toronto,CA,North America,Deep Tech; AI; Quantum,creativedestructionlab.com
+18,MassChallenge,Accelerator,Boston,US,North America,General; Impact,masschallenge.org
+19,StartX,University Accelerator,Palo Alto,US,North America,General (Stanford),startx.com
+20,Berkeley SkyDeck,University Accelerator,Berkeley,US,North America,General; Deep Tech (UC Berkeley),skydeck.berkeley.edu
+21,The Engine,Venture Fund + Campus,Cambridge,US,North America,Tough Tech,engine.xyz
+22,MIT delta v,University Accelerator,Cambridge,US,North America,General (MIT),entrepreneurship.mit.edu
+23,Harvard Innovation Labs,University Program,Boston,US,North America,General (Harvard),innovationlabs.harvard.edu
+24,Activate,Fellowship,Berkeley,US,North America,Hard Tech; Energy,activate.org
+25,Breakthrough Energy Fellows,Fellowship,Washington D.C.,US,North America,Climate Tech,breakthroughenergy.org
+26,Elemental Excelerator,Accelerator,Honolulu,US,North America,Climate Tech,elementalexcelerator.com
+27,Greentown Labs,Incubator,Somerville,US,North America,Climate Tech; Hardware,greentownlabs.com
+28,Newlab,Incubator,New York,US,North America,Deep Tech; Mobility; Energy,newlab.com
+29,Dreamit,Accelerator,Philadelphia,US,North America,Health Tech; Security; Urban Tech,dreamit.com
+30,gener8tor,Accelerator,Milwaukee,US,North America,General,gener8tor.com
+31,Betaworks,Studio + Accelerator,New York,US,North America,Consumer; AI,betaworks.com
+32,Founder Institute,Pre-Seed Accelerator,Palo Alto,US,North America,General,fi.co
+33,Boost VC,Accelerator + VC,San Mateo,US,North America,Deep Tech; Crypto,boost.vc
+34,Starburst Aerospace,Accelerator,Paris,FR,Europe,Aerospace; Defense,starburst.aero
+35,MassRobotics,Incubator,Boston,US,North America,Robotics,massrobotics.org
+36,Village Capital,Accelerator + VC,Washington D.C.,US,North America,Impact,vilcap.com
+37,DMZ,University Incubator,Toronto,CA,North America,General (Toronto Metropolitan University),dmz.torontomu.ca
+38,Communitech,Incubator,Waterloo,CA,North America,Tech; Deep Tech,communitech.ca
+39,Founders Factory,Venture Builder,London,GB,Europe,General; Climate; Health,foundersfactory.com
+40,Wayra,Corporate Accelerator,Madrid,ES,Europe,General,wayra.com
+41,Startupbootcamp,Accelerator,Amsterdam,NL,Europe,Fintech; Health; Industry,startupbootcamp.org
+42,Rockstart,Accelerator + VC,Amsterdam,NL,Europe,Energy; Health; AgriFood,rockstart.com
+43,YES!Delft,Incubator,Delft,NL,Europe,Deep Tech,yesdelft.com
+44,Intel Ignite,Corporate Accelerator,Munich,DE,Europe,Deep Tech,intel.com
+45,UnternehmerTUM,Incubator,Garching,DE,Europe,Deep Tech; General (TUM),unternehmertum.de
+46,TUM Venture Labs,University Program,Munich,DE,Europe,Deep Tech (TUM),tum.de
+47,Merantix,Venture Studio,Berlin,DE,Europe,AI,merantix.com
+48,Startup Autobahn,Corporate Accelerator,Stuttgart,DE,Europe,Mobility; Industry,startup-autobahn.com
+49,Next Media Accelerator,Accelerator,Hamburg,DE,Europe,Media Tech; AI,nma.vc
+50,Main Incubator,Corporate Incubator,Frankfurt,DE,Europe,Fintech; Insurtech,mainincubator.de
+51,Techfounders,Venture Builder,Munich,DE,Europe,Deep Tech; Software,techfounders.com
+52,SPRIND,Government Agency,Leipzig,DE,Europe,Breakthrough innovation; Deep Tech,sprind.org
+53,Hello Tomorrow,Deep tech network,Paris,FR,Europe,Deep Tech,hello-tomorrow.org
+54,Agoranov,Incubator,Paris,FR,Europe,Deep Tech; Science,agoranov.com
+55,Wilco,Accelerator,Paris,FR,Europe,General,wilco.fr
+56,Numa,Accelerator,Paris,FR,Europe,General; Corporate,numa.co
+57,Barclays Eagle Labs,Incubator,London,GB,Europe,Fintech; General,eaglelabs.io
+58,Level39,Campus,London,GB,Europe,Fintech; Cyber; Retail,level39.co
+59,EIT InnoEnergy,Accelerator + Investor,Eindhoven,NL,Europe,Energy; Batteries,innoenergy.com
+60,EIT Climate-KIC,Accelerator,Amsterdam,NL,Europe,Climate Tech,climate-kic.org
+61,Kickstart Innovation,Accelerator,Zurich,CH,Europe,Corporate Innovation,kickstart-innovation.com
+62,Venture Kick,Funding program,Zurich,CH,Europe,University spin-offs; Deep Tech,venturekick.ch
+63,EPFL Innovation Park,Incubator,Lausanne,CH,Europe,Deep Tech,epfl-innovationpark.ch
+64,Startup Wise Guys,Accelerator,Tallinn,EE,Europe,B2B; SaaS; Fintech,startupwiseguys.com
+65,Katapult Accelerator,Accelerator,Oslo,NO,Europe,Impact; Deep Tech,katapultaccelerator.com
+66,INiTS,Incubator,Vienna,AT,Europe,University spin-offs; Deep Tech,inits.at
+67,Beta-i,Accelerator,Lisbon,PT,Europe,General; Corporate Innovation,beta-i.com
+68,Lanzadera,Accelerator,Valencia,ES,Europe,General,lanzadera.es
+69,Mind the Bridge,Accelerator + Advisory,Milan,IT,Europe,Corporate Innovation,mindthebridge.com
+70,NDRC,Accelerator,Dublin,IE,Europe,General,ndrc.ie
+71,ESA Business Incubation Centres,Government Incubator,Noordwijk,NL,Europe,Space; Deep Tech,esa.int
+72,Seedstars,Accelerator + Investor,Lausanne,CH,Europe,General (emerging markets),seedstars.com
+73,Flat6Labs,Accelerator,Cairo,EG,Middle East & Africa,General,flat6labs.com
+74,Hub71,Incubator,Abu Dhabi,AE,Middle East & Africa,General; AI,hub71.com
+75,in5,Incubator,Dubai,AE,Middle East & Africa,Tech; Media; Design,in5.ae
+76,DIFC FinTech Hive,Accelerator,Dubai,AE,Middle East & Africa,Fintech,difc.ae
+77,Astrolabs,Incubator,Dubai,AE,Middle East & Africa,General,astrolabs.com
+78,Oasis500,Accelerator + Investor,Amman,JO,Middle East & Africa,General,oasis500.com
+79,ITU Cekirdek,University Incubator,Istanbul,TR,Europe,General; Deep Tech,itucekirdek.com
+80,MEST Africa,Training + Incubator,Accra,GH,Middle East & Africa,Software,meltwater.org
+81,CcHUB,Incubator,Lagos,NG,Middle East & Africa,General; Impact,cchubnigeria.com
+82,Norrsken22,Campus,Kigali,RW,Middle East & Africa,Impact,norrsken22.com
+83,Surge (Peak XV),Accelerator,Bengaluru,IN,Asia-Pacific,General,surgeahead.com
+84,T-Hub,Incubator,Hyderabad,IN,Asia-Pacific,General; Deep Tech,t-hub.co
+85,Axilor Ventures,Incubator,Bengaluru,IN,Asia-Pacific,General,axilorventures.com
+86,SINE IIT Bombay,University Incubator,Mumbai,IN,Asia-Pacific,Deep Tech,sineiitb.org
+87,CIIE.CO,University Incubator,Ahmedabad,IN,Asia-Pacific,General; Agri; Health,ciie.co
+88,Brinc,Accelerator + VC,Hong Kong,HK,Asia-Pacific,Hardware; IoT; Fintech,brinc.io
+89,Cyberport,Incubator,Hong Kong,HK,Asia-Pacific,Fintech; AI,cyberport.hk
+90,JFDI.Asia,Accelerator,Singapore,SG,Asia-Pacific,General,jfdi.asia
+91,BLOCK71,Incubator,Singapore,SG,Asia-Pacific,General; Deep Tech (NUS),block71.co
+92,SparkLabs Group,Accelerator + VC,Seoul,KR,Asia-Pacific,General; Deep Tech,sparklabsgroup.com
+93,Open Network Lab,Accelerator,Tokyo,JP,Asia-Pacific,General,onlab.jp
+94,Plug and Play Japan,Corporate Accelerator,Tokyo,JP,Asia-Pacific,General; Corporate,plugandplay.jp
+95,TusStar,Incubator,Beijing,CN,Asia-Pacific,General; Deep Tech (Tsinghua),tusstar.com
+96,Startmate,Accelerator,Sydney,AU,Asia-Pacific,General,startmate.com
+97,Cicada Innovations,Incubator,Sydney,AU,Asia-Pacific,Deep Tech,cicadainnovations.com
+98,Start-Up Chile,Government Accelerator,Santiago,CL,Latin America,General,startupchile.org
+99,NXTP Labs,Accelerator + VC,Buenos Aires,AR,Latin America,General,nxtp.vc
+100,Cubo Itau,Incubator,Sao Paulo,BR,Latin America,General; Fintech,cubo.network

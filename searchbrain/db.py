@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS startups (
     location_precision TEXT,
     topic TEXT,
     yc_batch TEXT,
+    backed_by TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -80,6 +81,10 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     _add_column(conn, "saved_searches", "last_seen_at", "TEXT")
     _add_column(conn, "startups", "yc_batch", "TEXT")
+    _add_column(conn, "startups", "backed_by", "TEXT")
+    # YC companies stored before backed_by existed
+    conn.execute("UPDATE startups SET backed_by = 'Y Combinator' WHERE yc_batch IS NOT NULL AND COALESCE(backed_by, '') = ''")
+    conn.commit()
     _add_name_key_column(conn)
     return conn
 

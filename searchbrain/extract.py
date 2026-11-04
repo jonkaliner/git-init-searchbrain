@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
-from searchbrain import db, llm
+from searchbrain import db, llm, programs
 from searchbrain.log import get_logger
 from searchbrain.models import Startup
 from searchbrain.search import SearchHit, build_queries, search
@@ -129,6 +129,7 @@ def merge_duplicates(startups: list[Startup]) -> list[Startup]:
             for field, value in vars(startup).items():
                 if getattr(existing, field) in (None, "") and value not in (None, ""):
                     setattr(existing, field, value)
+            existing.backed_by = programs.join_names(existing.backed_by, startup.backed_by)
         for key in keys | {db.startup_key(existing), db.name_key(existing)}:
             by_key[key] = existing
     return merged

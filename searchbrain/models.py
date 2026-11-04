@@ -20,3 +20,4 @@ class Startup:
     location_precision: str | None = None
     topic: str | None = None
     yc_batch: str | None = None  # e.g. "W24" for Y Combinator Winter 2024, None if not a YC company
+    backed_by: str | None = None  # program(s) the startup was found at, e.g. "Y Combinator; HAX"

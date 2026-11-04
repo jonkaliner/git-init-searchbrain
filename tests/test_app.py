@@ -93,7 +93,7 @@ def test_chat_proposes_web_search_and_runs_it_after_confirm(app, monkeypatch):
     app.run()
     app.chat_input(key="home_question").set_value("Which lidar companies exist?").run()
     assert "No lidar startups yet." in page_text(app)
-    assert "Search the web for a new area?" in page_text(app)
+    assert "Build a deal flow for this area?" in page_text(app)
 
     chat_id = app.session_state.chat_id
     app.button(key=f"ws_start_{chat_id}_1").click().run()
@@ -102,7 +102,24 @@ def test_chat_proposes_web_search_and_runs_it_after_confirm(app, monkeypatch):
     assert "lidar sensors" in [s["name"] for s in storage.saved_searches(db.connect())]  # Scout created
     messages = storage.get_chat(db.connect(), chat_id)["messages"]
     assert messages[1]["web_search"]["status"] == "done"
-    assert COLLECT_CALLS[-1] == ("yc", "web")  # YC checkbox is on by default
+    assert COLLECT_CALLS[-1] == ("yc", "programs", "web")  # all three sources are ticked by default
+
+
+def test_deal_flow_card_uses_only_the_ticked_sources(app, monkeypatch):
+    from searchbrain import collect as collect_module
+
+    def ask_with_proposal(question, history=None, conn=None, **kwargs):
+        return agent.Answer(text="No chip startups yet.", web_search={"topic": "autonomous driving AI chips", "subtopics": []})
+
+    monkeypatch.setattr(agent, "ask", ask_with_proposal)
+    monkeypatch.setattr(collect_module, "collect", fake_collect)
+    app.run()
+    app.chat_input(key="home_question").set_value("Build a deal flow for autonomous driving AI chips").run()
+    chat_id = app.session_state.chat_id
+    app.checkbox(key=f"ws_src_web_{chat_id}_1").uncheck().run()
+    app.button(key=f"ws_start_{chat_id}_1").click().run()
+    assert not app.exception
+    assert COLLECT_CALLS[-1] == ("yc", "programs")
 
 
 def test_yc_only_button_skips_the_web(app, monkeypatch):
@@ -123,7 +140,7 @@ def test_yc_only_button_skips_the_web(app, monkeypatch):
     assert not app.exception
     assert COLLECT_CALLS[-1] == ("yc",)
     assert "Found Ouster (YC W15)." in page_text(app)
-    assert "1 of them from Y Combinator" in page_text(app)
+    assert "1 from Y Combinator" in page_text(app)
 
 
 def test_home_button_returns_to_start_page(app):

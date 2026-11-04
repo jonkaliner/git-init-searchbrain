@@ -93,6 +93,7 @@ def to_startup(company: dict, topic: str | None) -> Startup:
         source_url=company.get("url") or None,
         topic=topic,
         yc_batch=short_batch(company.get("batch")),
+        backed_by="Y Combinator",
     )
 
 
