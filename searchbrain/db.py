@@ -76,25 +76,6 @@ CREATE TABLE IF NOT EXISTS matches (
     last_seen_at TEXT NOT NULL,
     PRIMARY KEY (scout_id, startup_key)
 );
-
-CREATE TABLE IF NOT EXISTS favorites (
-    key TEXT PRIMARY KEY,
-    added_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS saved_searches (
-    name TEXT PRIMARY KEY,
-    filters TEXT NOT NULL,
-    saved_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chats (
-    id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    messages TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
 """
 
 
@@ -109,7 +90,6 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    _add_column(conn, "saved_searches", "last_seen_at", "TEXT")
     _add_column(conn, "startups", "yc_batch", "TEXT")
     _add_column(conn, "startups", "backed_by", "TEXT")
     # YC companies stored before backed_by existed
@@ -335,6 +315,6 @@ def created_times(conn: sqlite3.Connection) -> dict[str, str]:
 
 
 def all_startups_with_keys(conn: sqlite3.Connection) -> list[tuple[str, Startup]]:
-    """Like all_startups, but with each row's key (needed e.g. for favorites)."""
+    """Like all_startups, but with each row's key."""
     rows = conn.execute(f"SELECT key, {', '.join(STARTUP_COLUMNS)} FROM startups ORDER BY name COLLATE NOCASE")
     return [(row["key"], Startup(**{col: row[col] for col in STARTUP_COLUMNS})) for row in rows]

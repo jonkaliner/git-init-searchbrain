@@ -10,9 +10,6 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "openai/gpt-oss-20b")  # extraction and summaries
 # The chat needs quick tool calls: in a test on 2026-10-29 this model answered in 27 s instead of 216 s
 NVIDIA_CHAT_MODEL = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-
-USER_NAME = os.getenv("USER_NAME", "").strip()
 
 # "duckduckgo" needs no key. "tavily" is the optional backup and needs TAVILY_API_KEY.
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "duckduckgo").strip().lower()

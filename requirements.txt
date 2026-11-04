@@ -1,11 +1,22 @@
-openai
-python-dotenv
-requests
-tavily-python
-google-genai
-streamlit
-pandas
-geopy
-folium
-streamlit-folium
-pytest
+# Python 3.13 (CrewAI does not support Python 3.14 or newer yet). Versions are pinned to what was tested.
+
+# the two agents (CrewAI) and their tools (LangChain)
+crewai==1.15.35
+langchain-core==1.7.4
+
+# the AI model: NVIDIA's OpenAI-compatible API
+openai==2.54.0
+
+# search and reading the web
+ddgs==9.16.1
+feedparser==6.0.14
+beautifulsoup4==4.15.0
+requests==2.34.2
+tavily-python==0.8.5  # optional backup for the web search
+
+# places and maps
+geopy==2.5.0
+folium==0.20.0
+
+python-dotenv==1.2.4
+pytest==9.2.0
