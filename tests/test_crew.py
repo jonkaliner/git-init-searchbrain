@@ -86,6 +86,16 @@ def test_deal_flow_saves_checked_startups_and_matches(conn, monkeypatch):
     assert scouts.all_scouts(conn)[0]["last_run_at"]
 
 
+def test_scores_written_in_other_ways_are_understood(conn, monkeypatch):
+    tools_showed(monkeypatch, SEEN)
+    scout_id = scouts.add_scout(conn, "robot hands")
+    ratings = json.dumps({"matches": [{"name": "Mimic Robotics", "score": "4/5", "why": "x"}, {"name": "Tangent", "score": 3.0, "why": "y"}]})
+
+    result = crew.build_deal_flow(conn, scout_id, "robot hands", SCOUT_ANSWER, ratings, FakeGeocoder())
+
+    assert [(m["name"], m["score"]) for m in result.matches] == [("Mimic Robotics", 4), ("Tangent", 3)]
+
+
 def test_low_scores_are_not_matches_and_scores_are_capped(conn, monkeypatch):
     tools_showed(monkeypatch, SEEN)
     scout_id = scouts.add_scout(conn, "robot hands")

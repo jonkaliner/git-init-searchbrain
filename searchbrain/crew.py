@@ -167,13 +167,14 @@ def build_deal_flow(
         candidates = []
     result.candidates = len(candidates)
 
+    program_list = programs.load_programs()
     stored: dict[str, tuple[str, Startup]] = {}  # name_key -> (database key, startup)
     for raw in candidates:
         startup = check_candidate(raw, seen, topic=scout_id)
         if startup is None:
             result.rejected.append(str(raw.get("name")))
             continue
-        startup.backed_by = programs.join_names(startup.backed_by, programs.program_for_url(startup.source_url or startup.link, programs.load_programs()))
+        startup.backed_by = programs.join_names(startup.backed_by, programs.program_for_url(startup.source_url or startup.link, program_list))
         db.fill_from_db(conn, startup)
         if startup.location_precision is None and (startup.city or startup.country):
             geocoder.geocode(startup)
@@ -192,11 +193,13 @@ def build_deal_flow(
     for rating in ratings:
         name = str(rating.get("name") or "").strip()
         entry = stored.get(db.name_key(Startup(name=name))) if name else None
-        score = rating.get("score")
-        if entry is None or not str(score).strip().isdigit():
+        try:
+            score = min(int(float(str(rating.get("score")).split("/")[0])), 5)  # 4, "4", 4.0 and "4/5" all mean 4
+        except ValueError:
+            score = None
+        if entry is None or score is None:
             logger.warning("Scout %s: rating ignored (not a candidate, or no score): %r", scout_id, rating)
             continue
-        score = min(int(score), 5)
         if score < MIN_SCORE:
             continue
         key, startup = entry
