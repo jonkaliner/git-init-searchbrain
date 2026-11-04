@@ -33,6 +33,49 @@ def test_subtopics_widen_the_search():
     assert [s.name for s in yc.find_startups("battery recycling", ["payments"], companies=COMPANIES)] == ["Payments Co"]
 
 
+class FakeGeocoder:
+    """Gives every startup with a city a position, like a successful Nominatim lookup."""
+
+    def __init__(self):
+        self.requests = 0
+        self.geocoded = []
+
+    def geocode(self, startup):
+        self.geocoded.append(startup.name)
+        self.requests += 1
+        startup.latitude, startup.longitude = 1.0, 2.0
+        startup.location_precision = "city" if startup.city else "none"
+
+
+def test_import_all_stores_every_active_company_and_geocodes_only_new_ones(tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    geocoder = FakeGeocoder()
+
+    first = yc.import_all(conn, COMPANIES, geocoder)
+    assert (first["new"], first["updated"]) == (3, 0)  # OldLidar is inactive
+    stored = {s.name: s for s in db.all_startups(conn)}
+    assert set(stored) == {"Ouster", "Robo Hands", "Payments Co"}
+    assert stored["Ouster"].location_precision == "city" and stored["Payments Co"].location_precision == "none"
+
+    second = yc.import_all(conn, COMPANIES, geocoder)
+    assert (second["new"], second["updated"]) == (0, 3)
+    assert len(geocoder.geocoded) == 3  # the second import did not geocode anything again
+
+
+def test_import_all_keeps_a_known_topic_and_location(tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    first_run = yc.find_startups("lidar sensors", companies=COMPANIES)[0]  # Ouster, topic "lidar sensors"
+    first_run.latitude, first_run.longitude, first_run.location_precision = 37.7, -122.4, "city"
+    db.upsert_startup(conn, first_run)
+
+    geocoder = FakeGeocoder()
+    yc.import_all(conn, COMPANIES, geocoder)
+
+    ouster = next(s for s in db.all_startups(conn) if s.name == "Ouster")
+    assert ouster.topic == "lidar sensors" and ouster.latitude == 37.7
+    assert "Ouster" not in geocoder.geocoded
+
+
 def test_collect_from_yc_only_needs_no_web_search(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_FILE", tmp_path / "test.db")
     monkeypatch.setattr(yc, "load_companies", lambda: COMPANIES)

@@ -1,6 +1,6 @@
 """Step 2: send one small test request to each API and report the result.
 
-Run with:  .venv\\Scripts\\python.exe check_apis.py
+Run with:  .venv313\\Scripts\\python.exe check_apis.py
 """
 
 from searchbrain import config
@@ -20,15 +20,13 @@ def check_nvidia() -> str:
     return response.choices[0].message.content.strip()
 
 
-def check_tavily() -> str:
-    from tavily import TavilyClient
+def check_search() -> str:
+    from searchbrain import search
 
-    client = TavilyClient(api_key=config.get("TAVILY_API_KEY"))
-    response = client.search("climate tech startup founded 2024", max_results=3)
-    results = response.get("results", [])
-    if not results:
-        return "Search worked, but returned no results"
-    return f"{len(results)} results, first: {results[0]['title']} ({results[0]['url']})"
+    hits = search.search(["climate tech startup founded 2024"], max_results=3)
+    if not hits:
+        return f"{config.SEARCH_PROVIDER}: no results (rate limited? see logs/searchbrain.log)"
+    return f"{config.SEARCH_PROVIDER}: {len(hits)} results, first: {hits[0].title} ({hits[0].url})"
 
 
 def check_nominatim() -> str:
@@ -47,7 +45,7 @@ def main() -> None:
         print("Missing in .env:", ", ".join(missing))
         return
 
-    for name, check in [("NVIDIA", check_nvidia), ("Tavily", check_tavily), ("Nominatim", check_nominatim)]:
+    for name, check in [("NVIDIA", check_nvidia), ("Search", check_search), ("Nominatim", check_nominatim)]:
         try:
             print(f"[OK]    {name}: {check()}")
         except Exception as error:

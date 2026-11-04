@@ -1,8 +1,7 @@
 """Accelerators, incubators and other startup programs (sources/programs.csv).
 
-They are used as a search scope: the web search can be limited to their websites,
-e.g. portfolio or demo day pages, and a startup found there is marked as "backed by" that program.
-Nothing is crawled: only pages that the search engine returns are read.
+Their RSS feeds are read by feeds.py (new cohorts, demo days, portfolio news), and a startup found
+on a program's website is marked as "backed by" that program.
 """
 
 import csv
@@ -11,8 +10,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 PROGRAMS_FILE = Path("sources") / "programs.csv"
-DOMAINS_PER_SEARCH = 20  # websites per search request, so one request does not get too broad
-SKIP_FOR_SEARCH = {"ycombinator.com"}  # YC is covered better by its company directory (yc.py)
 
 
 @dataclass(frozen=True)
@@ -63,9 +60,3 @@ def join_names(*values: str | None) -> str | None:
             if name.strip() and name.strip() not in names:
                 names.append(name.strip())
     return "; ".join(names) or None
-
-
-def search_domain_groups(programs: list[Program]) -> list[list[str]]:
-    """The program websites in groups of DOMAINS_PER_SEARCH, one search request per group."""
-    domains = sorted({domain_of(p.website) for p in programs} - SKIP_FOR_SEARCH)
-    return [domains[i : i + DOMAINS_PER_SEARCH] for i in range(0, len(domains), DOMAINS_PER_SEARCH)]

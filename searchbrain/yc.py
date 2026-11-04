@@ -7,12 +7,15 @@ so no AI extraction is needed: matching companies are found in seconds and cost 
 
 import json
 import re
+import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
 
 from searchbrain import db
+from searchbrain.geocode import Geocoder
 from searchbrain.log import get_logger
 from searchbrain.models import Startup
 
@@ -116,3 +119,39 @@ def find_startups(topic: str, subtopics: list[str] | None = None, companies: lis
         scored.append((score, company))
     scored.sort(key=lambda item: -item[0])
     return [to_startup(company, topic) for _, company in scored[:MAX_RESULTS]]
+
+
+def import_all(conn: sqlite3.Connection, companies: list[dict] | None = None, geocoder: Geocoder | None = None) -> dict:
+    """Store every active YC company, so all of them are on the map and can be searched.
+
+    The list only has locations as text, so companies that are new to the database are geocoded
+    (Nominatim: every city is looked up once, then it is in the cache). Companies that are
+    already stored keep their location. Returns counts for the report.
+    """
+    companies = companies if companies is not None else load_companies()
+    geocoder = geocoder or Geocoder(conn)
+    counts = Counter()
+    for company in companies:
+        if company.get("status") not in STATUSES or not company.get("name"):
+            continue
+        startup = to_startup(company, topic=None)
+        known = db.find_startup(conn, startup)
+        if known is None or known.location_precision is None:
+            geocoder.geocode(startup)
+        counts[db.upsert_startup(conn, startup, commit=False)] += 1
+    conn.commit()
+    logger.info("YC import: %s new, %s updated, %s Nominatim requests", counts["new"], counts["updated"], geocoder.requests)
+    return {"new": counts["new"], "updated": counts["updated"], "geocode_requests": geocoder.requests}
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Y Combinator directory.")
+    parser.add_argument("action", choices=["import"], help="import: store all active YC companies (and put them on the map)")
+    parser.parse_args()
+    print(import_all(db.connect()))
+
+
+if __name__ == "__main__":
+    main()

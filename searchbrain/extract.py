@@ -74,14 +74,14 @@ def parse_answer(answer: str) -> list[dict]:
     return startups
 
 
-def _clean_text(value) -> str | None:
+def clean_text(value) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text if text and text.lower() not in {"null", "none", "unknown", "n/a"} else None
 
 
-def _clean_year(value) -> int | None:
+def clean_year(value) -> int | None:
     try:
         year = int(str(value).strip()[:4])
     except (TypeError, ValueError):
@@ -91,24 +91,24 @@ def _clean_year(value) -> int | None:
 
 def to_startup(raw: dict, allowed_sources: set[str], topic: str | None) -> Startup | None:
     """Turn one raw model record into a clean Startup, or None if it is unusable."""
-    name = _clean_text(raw.get("name"))
+    name = clean_text(raw.get("name"))
     if not name:
         return None
-    source_url = _clean_text(raw.get("source_url"))
-    country = _clean_text(raw.get("country"))
+    source_url = clean_text(raw.get("source_url"))
+    country = clean_text(raw.get("country"))
     if country and country.lower() in REGIONS:
         country = None
-    city = _clean_text(raw.get("city"))
+    city = clean_text(raw.get("city"))
     if city:
         city = city.split(",")[0].strip()  # "New York, New York" -> "New York"
     return Startup(
         name=name,
-        description=_clean_text(raw.get("description")) or "",
-        industry=(_clean_text(raw.get("industry")) or "").lower() or None,
+        description=clean_text(raw.get("description")) or "",
+        industry=(clean_text(raw.get("industry")) or "").lower() or None,
         country=country,
         city=city,
-        founding_year=_clean_year(raw.get("founding_year")),
-        link=_clean_text(raw.get("link")),
+        founding_year=clean_year(raw.get("founding_year")),
+        link=clean_text(raw.get("link")),
         # The source must be one of our search results, never a made-up url
         source_url=source_url if source_url in allowed_sources else None,
         topic=topic,

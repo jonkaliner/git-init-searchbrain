@@ -2,8 +2,10 @@
 
 search -> extract -> fill in from database -> geocode -> summarize -> save -> world map
 
+This is the plain pipeline without agents. The agents (crew.py) do the same job with more judgment.
+
 Run with:
-  .venv\\Scripts\\python.exe -m searchbrain.collect "humanoid robotics" --sub "robot hand" --sub "actuator"
+  .venv313\\Scripts\\python.exe -m searchbrain.collect "humanoid robotics" --sub "robot hand" --sub "actuator" --sources yc,feeds,web
 """
 
 import argparse
@@ -11,7 +13,8 @@ import json
 import re
 from collections import Counter
 
-from searchbrain import db, llm, programs, yc
+from searchbrain import db, feeds, llm, programs, yc
+from searchbrain.db import fill_from_db
 from searchbrain.extract import extract_startups, merge_duplicates
 from searchbrain.geocode import geocode_all
 from searchbrain.log import get_logger
@@ -22,7 +25,7 @@ from searchbrain.worldmap import save_map
 logger = get_logger(__name__)
 
 SUMMARY_BATCH = 10
-PROGRAM_QUERIES = 2  # per group of program websites: the topic and the first subtopic
+FEED_POSTS_PER_QUERY = 10
 
 SUMMARY_PROMPT = """Reasoning: low
 Write a short profile for each startup: 1-2 sentences, at most 40 words.
@@ -34,17 +37,6 @@ Answer with JSON only, in the same order as the input:
 def topic_queries(topic: str, subtopics: list[str]) -> list[str]:
     """The general queries for the topic plus one query per subtopic."""
     return build_queries(keyword=topic) + [f"{sub} startup {topic}" for sub in subtopics]
-
-
-def fill_from_db(conn, startup: Startup) -> None:
-    """Take over known fields (e.g. city, summary) from an earlier run."""
-    existing = db.find_startup(conn, startup)
-    if existing is None:
-        return
-    for field, value in vars(existing).items():
-        if getattr(startup, field) in (None, "") and value not in (None, ""):
-            setattr(startup, field, value)
-    startup.backed_by = programs.join_names(existing.backed_by, startup.backed_by)
 
 
 def summarize(startups: list[Startup]) -> None:
@@ -68,32 +60,23 @@ def summarize(startups: list[Startup]) -> None:
             startup.summary = (summary or "").strip() or startup.description or None
 
 
-def program_queries(topic: str, subtopics: list[str]) -> list[str]:
-    """The queries sent to every group of program websites: the topic and the first subtopic."""
-    return [f"{topic} startup", *(f"{sub} startup" for sub in subtopics[: PROGRAM_QUERIES - 1])]
-
-
-def search_programs(topic: str, subtopics: list[str], program_list: list[programs.Program]) -> list[SearchHit]:
-    """Search only the websites of the accelerators and incubators, one request per group of websites."""
-    hits: list[SearchHit] = []
-    for group in programs.search_domain_groups(program_list):
-        hits += search(program_queries(topic, subtopics), include_domains=group)
-    return hits
-
-
-def program_search_count(subtopics: list[str]) -> int:
-    """How many search requests (Tavily credits) the program search needs."""
-    return len(programs.search_domain_groups(programs.load_programs())) * min(PROGRAM_QUERIES, 1 + len(subtopics))
+def feed_hits(conn, topic: str, subtopics: list[str]) -> list[SearchHit]:
+    """Recent posts of the accelerators (their RSS feeds, see feeds.py) that mention the topic or a subtopic."""
+    hits: dict[str, SearchHit] = {}
+    for query in [topic, *subtopics]:
+        for post in feeds.search_entries(conn, query, limit=FEED_POSTS_PER_QUERY):
+            hits.setdefault(post["link"], SearchHit(title=post["title"], url=post["link"], content=post["summary"] or "", score=0.5))
+    return list(hits.values())
 
 
 def collect(topic: str, subtopics: list[str] | None = None, on_progress=None, sources: tuple[str, ...] = ("web",)) -> dict:
     """Run the whole collect step for one topic. Returns counts for the report.
 
     sources (any combination):
-      "yc"       Y Combinator company list, takes seconds
-      "programs" websites of the accelerators and incubators in sources/programs.csv
-      "web"      the whole web
-    "programs" and "web" need the AI extraction, which takes minutes.
+      "yc"    Y Combinator company list, takes seconds
+      "feeds" recent posts of the accelerators and incubators (run `python -m searchbrain.feeds refresh` first)
+      "web"   the whole web (DuckDuckGo)
+    "feeds" and "web" need the AI extraction, which takes minutes.
     on_progress(batch_number, batch_count, status) is passed on to the extraction.
     """
     logger.info("Collect started: %s %s from %s", topic, subtopics or "", sources)
@@ -103,7 +86,7 @@ def collect(topic: str, subtopics: list[str] | None = None, on_progress=None, so
 
     yc_startups = yc.find_startups(topic, subtopics) if "yc" in sources else []
     web_hits = search(topic_queries(topic, subtopics)) if "web" in sources else []
-    program_hits = search_programs(topic, subtopics, program_list) if "programs" in sources else []
+    program_hits = feed_hits(conn, topic, subtopics) if "feeds" in sources else []
     hits = list({hit.url: hit for hit in web_hits + program_hits}.values())
     statuses = Counter()
 
@@ -148,7 +131,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect startups for a topic and save them.")
     parser.add_argument("topic")
     parser.add_argument("--sub", action="append", default=[], help="extra subtopic, can be repeated")
-    parser.add_argument("--sources", default="web", help='comma separated: "web", "yc", "programs" (default: web)')
+    parser.add_argument("--sources", default="web", help='comma separated: "web", "yc", "feeds" (default: web)')
     args = parser.parse_args()
     sources = tuple(s.strip() for s in args.sources.split(",") if s.strip())
 

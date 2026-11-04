@@ -14,7 +14,14 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 USER_NAME = os.getenv("USER_NAME", "").strip()
 
-REQUIRED_KEYS =["NVIDIA_API_KEY", "TAVILY_API_KEY", "NOMINATIM_USER_AGENT"]
+# "duckduckgo" needs no key. "tavily" is the optional backup and needs TAVILY_API_KEY.
+SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "duckduckgo").strip().lower()
+
+# How Searchbrain introduces itself to websites it reads (feeds, pages). robots.txt is matched on the first word.
+BOT_NAME = "SearchbrainBot"
+BOT_USER_AGENT = f"{BOT_NAME}/0.1 (+https://github.com/jonkaliner/git-init-searchbrain)"
+
+REQUIRED_KEYS = ["NVIDIA_API_KEY", "NOMINATIM_USER_AGENT"]
 
 
 class ConfigError(Exception):

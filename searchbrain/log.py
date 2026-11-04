@@ -34,9 +34,13 @@ def get_logger(name: str = "searchbrain") -> logging.Logger:
     root = logging.getLogger("searchbrain")
     if not root.handlers:
         LOG_FILE.parent.mkdir(exist_ok=True)
-        handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        handler.addFilter(HideSecrets())
-        root.addHandler(handler)
+        handlers = [logging.FileHandler(LOG_FILE, encoding="utf-8")]
+        if os.getenv("GITHUB_ACTIONS"):  # on GitHub the log file is gone after the run: show the log in the run's console
+            handlers.append(logging.StreamHandler())
+        for handler in handlers:
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+            handler.addFilter(HideSecrets())
+            root.addHandler(handler)
         root.setLevel(logging.INFO)
+        root.propagate = False  # only our own handlers: other handlers in the process would not hide secrets
     return logging.getLogger(name)

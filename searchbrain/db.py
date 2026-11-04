@@ -1,5 +1,6 @@
 """Local SQLite database for the collected startups."""
 
+import os
 import re
 import sqlite3
 from dataclasses import asdict, fields
@@ -8,8 +9,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from searchbrain.models import Startup
+from searchbrain.programs import join_names
 
-DB_FILE = Path("data") / "searchbrain.db"
+DB_FILE = Path(os.getenv("SEARCHBRAIN_DB") or Path("data") / "searchbrain.db")  # the env variable is for tests with a copy
 
 # Legal suffixes that do not change which company is meant ("Proception Inc" = "Proception")
 LEGAL_SUFFIXES = r"\b(inc|incorporated|ltd|limited|llc|gmbh|ag|sa|sas|bv|plc|corp|corporation|co)\b\.?"
@@ -45,6 +47,34 @@ CREATE TABLE IF NOT EXISTS geocode_cache (
     longitude REAL,
     found INTEGER NOT NULL,
     looked_up_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS feed_entries (
+    id TEXT PRIMARY KEY,
+    program TEXT NOT NULL,
+    title TEXT NOT NULL,
+    link TEXT NOT NULL,
+    summary TEXT,
+    published TEXT,
+    fetched_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scouts (
+    id TEXT PRIMARY KEY,
+    request TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_run_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS matches (
+    scout_id TEXT NOT NULL,
+    startup_key TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    why TEXT,
+    concerns TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (scout_id, startup_key)
 );
 
 CREATE TABLE IF NOT EXISTS favorites (
@@ -131,8 +161,11 @@ def existing_key(conn: sqlite3.Connection, startup: Startup) -> str | None:
     return row["key"] if row else None
 
 
-def upsert_startup(conn: sqlite3.Connection, startup: Startup) -> str:
-    """Insert a new startup or fill in missing fields of an existing one. Returns "new" or "updated"."""
+def upsert_startup(conn: sqlite3.Connection, startup: Startup, commit: bool = True) -> str:
+    """Insert a new startup or fill in missing fields of an existing one. Returns "new" or "updated".
+
+    commit=False is for saving thousands of rows in one go: the caller commits at the end.
+    """
     existing = existing_key(conn, startup)
     key = existing or startup_key(startup)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -147,7 +180,8 @@ def upsert_startup(conn: sqlite3.Connection, startup: Startup) -> str:
             ON CONFLICT(key) DO UPDATE SET {updates}, updated_at = excluded.updated_at""",
         [key, name_key(startup), *asdict(startup).values(), now, now],
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return "updated" if existing else "new"
 
 
@@ -158,6 +192,17 @@ def find_startup(conn: sqlite3.Connection, startup: Startup) -> Startup | None:
         return None
     row = conn.execute(f"SELECT {', '.join(STARTUP_COLUMNS)} FROM startups WHERE key = ?", (key,)).fetchone()
     return Startup(**dict(row))
+
+
+def fill_from_db(conn: sqlite3.Connection, startup: Startup) -> None:
+    """Take over known fields (e.g. city, summary) from the stored version of this company."""
+    existing = find_startup(conn, startup)
+    if existing is None:
+        return
+    for field, value in vars(existing).items():
+        if getattr(startup, field) in (None, "") and value not in (None, ""):
+            setattr(startup, field, value)
+    startup.backed_by = join_names(existing.backed_by, startup.backed_by)
 
 
 def merge_duplicates(conn: sqlite3.Connection) -> list[str]:
@@ -237,6 +282,41 @@ def search_startups(
     sql += " ORDER BY name COLLATE NOCASE LIMIT ?"
     rows = conn.execute(sql, [*params, limit])
     return [Startup(**dict(row)) for row in rows]
+
+
+GENERIC_WORDS = {"startup", "company", "and", "the", "for", "with", "from"}  # say nothing about the topic
+
+
+def search_ranked(conn: sqlite3.Connection, keyword: str, countries: list[str] | None = None, limit: int = 12) -> list[Startup]:
+    """Search like a person: a startup does not need every word, the more words it matches the higher it ranks.
+
+    At least half of the words must match (anywhere). A word in the name or the one-line description
+    counts double compared to a word in the industry or the long summary.
+    """
+    stems = [stem for stem in keyword_stems(keyword) if stem not in GENERIC_WORDS] or keyword_stems(keyword)
+    if not stems:
+        return []
+    headline = "LOWER(name || ' ' || COALESCE(description, ''))"
+    background = "LOWER(COALESCE(industry, '') || ' ' || COALESCE(summary, ''))"
+    score = " + ".join(f"(CASE WHEN {headline} LIKE ? THEN 2 ELSE 0 END) + (CASE WHEN {background} LIKE ? THEN 1 ELSE 0 END)" for _ in stems)
+    matched = " + ".join(f"(CASE WHEN {headline} LIKE ? OR {background} LIKE ? THEN 1 ELSE 0 END)" for _ in stems)
+    params: list = []
+    for stem in stems:
+        params += [f"%{stem}%"] * 2
+    for stem in stems:
+        params += [f"%{stem}%"] * 2
+
+    where = ""
+    names = [COUNTRY_ALIASES.get(c.strip().lower(), c.strip().lower()) for c in countries or [] if c.strip()]
+    if names:
+        where = f"WHERE LOWER(country) IN ({', '.join('?' for _ in names)})"
+        params += names
+
+    sql = f"""SELECT {', '.join(STARTUP_COLUMNS)} FROM (
+                  SELECT *, {score} AS score, {matched} AS matched FROM startups {where}
+              ) WHERE matched >= ? ORDER BY score DESC, name COLLATE NOCASE LIMIT ?"""
+    rows = conn.execute(sql, [*params, -(-len(stems) // 2), limit])
+    return [Startup(**{col: row[col] for col in STARTUP_COLUMNS}) for row in rows]
 
 
 def all_startups(conn: sqlite3.Connection) -> list[Startup]:
