@@ -1,0 +1,20 @@
+name = "searchbrain-chat"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Websites that may call the Worker, comma separated. Change it when your site has another address.
+ALLOWED_ORIGINS = "https://jonkaliner.github.io"
+# NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+# Optional: at most 10 questions per minute per visitor (and Cloudflare location).
+# Needs Wrangler 4.36 or newer. Remove these lines if the deploy complains about them.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+# The key is NOT written here. Add it once with:   npx wrangler secret put NVIDIA_API_KEY

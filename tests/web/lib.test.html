@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>lib.js tests</title>
+<pre id="result">running ...</pre>
+<script type="module">
+// Open this page through a web server that serves the project folder, e.g.
+//   .venv313\Scripts\python.exe -m http.server 8000     ->  http://localhost:8000/tests/web/lib.test.html
+// It prints "ALL PASSED" when every check is fine.
+import * as lib from "../../docs/lib.js";
+
+const failures = [];
+let count = 0;
+function check(name, actual, expected) {
+  count += 1;
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) failures.push(`${name}\n    expected ${e}\n    got      ${a}`);
+}
+
+const startups = [
+  { key: "mimic.ai", name: "Mimic Robotics", description: "AI robotic hand", country: "Switzerland", city: "Zurich", year: 2024, batch: "W24", lat: 47.4, lon: 8.5 },
+  { key: "linkerbot.cn", name: "Linkerbot", summary: "Builds a robotic hand and more", country: "China" },
+  { key: "agility.com", name: "Agility Robotics", description: "Humanoid robot Digit", country: "United States", year: 2015 },
+  { key: "chipco.de", name: "ChipCo", description: "Automotive AI chips for autonomous driving", country: "Germany", city: "Munich", year: 2023 },
+  { key: "aichip.fr", name: "Kalray Lite", description: "AI chip for self-driving cars", country: "France" },
+];
+
+// words
+check("stem", [lib.stem("robots"), lib.stem("glass"), lib.stem("ai")], ["robot", "glass", "ai"]);
+// (the plural "s" is cut from every word, also from "autonomous": query and data are cut the same way, so they still match)
+check("topic words drop filler", lib.topicWords("Build a deal flow for autonomous driving AI chip startups, early stage, Europe or US"), ["autonomou", "driving", "ai", "chip", "europe", "us"]);
+
+// countries and regions
+const known = ["Switzerland", "China", "United States", "Germany", "France"];
+check("country by name", [...lib.countriesInText("startups in Germany", known)], ["Germany"]);
+check("region europe", [...lib.countriesInText("chips in Europe", known)].sort(), ["France", "Germany", "Switzerland"]);
+check("US in capitals is a country", [...lib.countriesInText("chips in Europe or US", known)].sort(), ["France", "Germany", "Switzerland", "United States"]);
+check("'us' in a sentence is not a country", [...lib.countriesInText("show us robot hands", known)], []);
+
+// search
+// Mimic has both words in its one-liner (score 4). Agility matches "robot" in its one-liner and Linkerbot both words only in
+// the long summary: both score 2, so they are sorted by name.
+check("search ranks the one-liner first", lib.searchStartups(startups, "robot hand").map((s) => s.key), ["mimic.ai", "agility.com", "linkerbot.cn"]);
+check("short words must be whole words", lib.searchStartups([{ key: "x", name: "Chain Corp", description: "maintain the chain" }], "ai"), []);
+check("search does not need every word", lib.searchStartups(startups, "humanoid robotic hand").map((s) => s.key), ["agility.com", "mimic.ai", "linkerbot.cn"]);
+check("country in the request is a filter", lib.searchStartups(startups, "AI chip startups in Germany").map((s) => s.key), ["chipco.de"]);
+check("region filter", lib.searchStartups(startups, "Build a deal flow for autonomous driving AI chip startups, early stage, Europe or US").map((s) => s.key), ["chipco.de", "aichip.fr"]);
+check("nothing to search for", lib.searchStartups(startups, "build a deal flow for"), []);
+check("limit", lib.searchStartups(startups, "robot", { limit: 1 }).length, 1);
+
+// deal flow requests
+check("deal flow request", [lib.isDealFlowRequest("Build a deal flow for lidar"), lib.isDealFlowRequest("Find startups in battery recycling"), lib.isDealFlowRequest("make me a dealflow")], [true, false, true]);
+
+// urls
+check("safe urls", [lib.safeUrl("https://a.com/x"), lib.safeUrl("a.com"), lib.safeUrl("javascript:alert(1)"), lib.safeUrl("not a url"), lib.safeUrl(null)], ["https://a.com/x", "https://a.com/", null, null, null]);
+
+// display helpers
+check("place", [lib.placeOf({ city: "Zurich", country: "Switzerland" }), lib.placeOf({ country: "China" }), lib.placeOf({})], ["Zurich, Switzerland", "China", "location unknown"]);
+check("stars", [lib.stars(4), lib.stars(9), lib.stars(0)], ["★★★★☆", "★★★★★", "☆☆☆☆☆"]);
+check("greeting", [lib.greeting(new Date(2026, 10, 4, 9), "Jon"), lib.greeting(new Date(2026, 10, 4, 15), ""), lib.greeting(new Date(2026, 10, 4, 20), "Jon")], ["Good morning, Jon", "Good afternoon", "Good evening, Jon"]);
+check("scout title", [lib.scoutTitle("Build a deal flow for autonomous driving AI chip startups, early stage, Europe or US", 40), lib.scoutTitle("humanoid hands")], ["Autonomous driving AI chip startups, ea…", "Humanoid hands"]);
+
+// new matches
+const scout = { matches: [{ key: "a", firstSeen: "2026-10-01" }, { key: "b", firstSeen: "2026-11-02" }, { key: "c", firstSeen: "2026-11-04" }] };
+check("new since last visit", lib.newMatches(scout, "2026-11-01").map((m) => m.key), ["b", "c"]);
+check("new in the last 7 days without a visit", lib.newMatches(scout, null, new Date("2026-11-05T12:00:00Z")).map((m) => m.key), ["b", "c"]);
+
+// filters
+const f = (o) => startups.filter((s) => lib.matchesFilters(s, o)).map((s) => s.key);
+check("filter keyword", f({ keyword: "robotic hand" }), ["mimic.ai", "linkerbot.cn"]);
+check("filter country", f({ countries: ["Germany", "France"] }), ["chipco.de", "aichip.fr"]);
+check("filter since", f({ since: 2023 }), ["mimic.ai", "chipco.de"]);
+check("filter located / yc", [f({ located: true }), f({ yc: true })], [["mimic.ai"], ["mimic.ai"]]);
+
+// charts
+check("count by", lib.countBy(startups, (s) => s.country, 2), [["China", 1], ["France", 1]]);
+
+// csv
+const csv = lib.toCsv([{ n: 'Say "hi", ok', u: "=HYPERLINK(1)" }, { n: "plain", u: null }], [{ label: "Name", value: (r) => r.n }, { label: "Url", value: (r) => r.u }]);
+check("csv quotes and formula guard", csv, 'Name,Url\r\n"Say ""hi"", ok",\'=HYPERLINK(1)\r\nplain,');
+
+// worker record
+check("worker record leaves out empty fields", lib.workerRecord({ name: "A", description: "d", year: 2020, link: "", batch: undefined, key: "ignored" }), { name: "A", what: "d", founded: 2020 });
+
+document.getElementById("result").textContent = failures.length ? `FAILED ${failures.length} of ${count}\n\n${failures.join("\n\n")}` : `ALL PASSED (${count} checks)`;
+</script>

@@ -1,6 +1,11 @@
 .env
 node_modules/
 __pycache__/
-.venv/
-data/
+.venv*/
 logs/
+.wrangler/
+
+# Local files of the pipeline: caches, test copies, backups and the old map. Only the database itself is committed,
+# because the weekly update on GitHub continues from it. (docs/data/ is a different folder and is committed.)
+/data/*
+!/data/searchbrain.db
