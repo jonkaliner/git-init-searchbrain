@@ -83,11 +83,15 @@ ANALYST_TASK = """The investor asks: "<<request>>"
 
 The Scout's list of candidates is in your context. Rate how well each candidate fits the request.
 
+First split the request into its parts: what the company builds (the topic, maybe two things together), the stage, the region.
+Judge every candidate against every part. A request for "AI chips for autonomous driving" asks for BOTH: a chip company
+with nothing to do with driving, or a driving company without chips, fits only half of the topic.
+
 Scores:
-5 = fits everything the investor asked for (topic, stage, region), with evidence
-4 = clearly fits the topic, and stage or region is likely right
-3 = fits the topic, but stage or region is unclear or partly wrong
-2 = related to the topic, but a weak fit
+5 = fits every part of the request, with evidence
+4 = fits the whole topic, and stage or region is likely right
+3 = fits only half of the topic, or fits the topic but stage or region is unclear or partly wrong
+2 = loosely related to the topic
 1 = not a fit: leave it out of your answer
 
 Be strict. If the investor asks for early stage, a company that is large, old or already acquired scores lower.
