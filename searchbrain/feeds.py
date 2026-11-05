@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 
 FEEDS_FILE = Path("sources") / "feeds.csv"
 FEED_COLUMNS = ["program", "website", "feed_url", "checked_at"]
+LF = chr(10)
 COMMON_FEED_PATHS = [
     "/feed", "/feed/", "/rss", "/rss.xml", "/feed.xml", "/atom.xml", "/index.xml",
     "/blog/feed", "/blog/rss.xml", "/blog/feed.xml", "/news/feed", "/news/rss.xml",
@@ -108,9 +109,7 @@ def load_feeds(path: Path | None = None) -> list[dict]:
 def save_feeds(rows: list[dict], path: Path | None = None) -> None:
     path = path or FEEDS_FILE
     with path.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=FEED_COLUMNS, lineterminator="
-")  # not the csv default 
-: git would see every run as a change
+        writer = csv.DictWriter(file, fieldnames=FEED_COLUMNS, lineterminator=LF)  # the csv default is CRLF: git would see every run as a change
         writer.writeheader()
         writer.writerows(rows)
 
