@@ -67,12 +67,12 @@ jobs:
         run: |
           git config user.name "searchbrain-bot"
           git config user.email "searchbrain-bot@users.noreply.github.com"
-          git add data/searchbrain.db docs/data
+          git add data/searchbrain.db docs/data sources/feeds.csv
           if git diff --cached --quiet; then
             echo "Nothing changed."
           else
             git commit -m "Update data $(date -u +%F)"
-            git pull --rebase origin "$BRANCH"
+            git pull --rebase --autostash origin "$BRANCH"
             git push origin "HEAD:$BRANCH"
           fi
 

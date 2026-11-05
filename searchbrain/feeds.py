@@ -108,7 +108,9 @@ def load_feeds(path: Path | None = None) -> list[dict]:
 def save_feeds(rows: list[dict], path: Path | None = None) -> None:
     path = path or FEEDS_FILE
     with path.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=FEED_COLUMNS)
+        writer = csv.DictWriter(file, fieldnames=FEED_COLUMNS, lineterminator="
+")  # not the csv default 
+: git would see every run as a change
         writer.writeheader()
         writer.writerows(rows)
 
