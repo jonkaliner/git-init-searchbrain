@@ -492,6 +492,30 @@ async function askQuestion(raw) {
   }
 }
 
+/** A small form for a new Scout. The agents run on GitHub, so the form copies the request and opens the workflow page. */
+function openNewScout() {
+  const input = h("textarea", { rows: "3", maxlength: "500", placeholder: "Build a deal flow for … e.g. lidar startups in Europe, early stage", "aria-label": "Request for the new Scout", style: "width:100%;border:1px solid var(--line);border-radius:10px;padding:.5rem .7rem;resize:vertical" });
+  const copy = h("button", { class: "btn primary", text: "Copy request and open GitHub" });
+  copy.addEventListener("click", async () => {
+    const request = input.value.trim().replace(/^(?!build a deal flow)/i, "Build a deal flow for ");
+    if (!input.value.trim()) return input.focus();
+    try { await navigator.clipboard.writeText(request); copy.textContent = "Copied ✓ opening GitHub …"; } catch { copy.textContent = "Select the text and copy it yourself"; }
+    if (CONFIG.repo) window.open(`https://github.com/${CONFIG.repo}/actions/workflows/update.yml`, "_blank", "noopener");
+  });
+  fill(DIALOG,
+    h("h3", { text: "◉ New Scout" }),
+    h("p", { class: "muted", text: "A Scout is a deal flow request. Two AI agents search Y Combinator, the accelerators and the web, rate every fit from 1 to 5 stars, and search again every Monday." }),
+    input,
+    h("ol", { class: "muted" },
+      h("li", { text: "Describe the topic, the stage and the region." }),
+      h("li", { text: "Click the button: the request is copied and the GitHub page opens." }),
+      h("li", { text: "There click “Run workflow”, paste the request into the first field and start it." }),
+      h("li", { text: "After about 10 minutes reload this site: the Scout is in the sidebar." })),
+    h("div", { class: "btn-row" }, copy, h("button", { class: "btn", text: "Close", onclick: () => DIALOG.close() })));
+  if (!DIALOG.open) DIALOG.showModal();
+  input.focus();
+}
+
 function dealFlowCard(request) {
   const repo = CONFIG.repo;
   const existing = state.scouts.find((s) => s.request.toLowerCase().replace(/\s+/g, " ") === request.toLowerCase().replace(/\s+/g, " "));
@@ -559,7 +583,8 @@ function renderSidebar() {
     navItem("🔎  Browse startups", "#/browse", name === "browse"),
     navItem("📊  Charts", "#/charts", name === "charts"),
     navItem(`⭐  Favorites${state.favorites.size ? ` (${state.favorites.size})` : ""}`, "#/favorites", name === "favorites"),
-    h("button", { class: "nav-item", onclick: fresh }, h("span", { class: "label", text: "＋  New chat" })));
+    h("button", { class: "nav-item", onclick: fresh }, h("span", { class: "label", text: "＋  New chat" })),
+    h("button", { class: "nav-item", onclick: () => { document.getElementById("sidebar").classList.remove("open"); openNewScout(); } }, h("span", { class: "label", text: "◉  New Scout" })));
   fill(document.getElementById("scout-nav"), ...(state.scouts.length
     ? state.scouts.map((scout) => {
         const fresh = newMatchesOf(scout).length;
