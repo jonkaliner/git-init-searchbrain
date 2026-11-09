@@ -502,16 +502,39 @@ function openNewScout() {
     try { await navigator.clipboard.writeText(request); copy.textContent = "Copied ✓ opening GitHub …"; } catch { copy.textContent = "Select the text and copy it yourself"; }
     if (CONFIG.repo) window.open(`https://github.com/${CONFIG.repo}/actions/workflows/update.yml`, "_blank", "noopener");
   });
+  // With the Worker the Scout starts right here; without it the request is copied and GitHub opens
+  const code = h("input", { type: "password", placeholder: "Access code", "aria-label": "Access code", autocomplete: "off", value: store.get("scoutCode", ""), style: "width:100%;border:1px solid var(--line);border-radius:10px;padding:.45rem .7rem;margin-top:.6rem" });
+  const status = h("p", { class: "muted" });
+  const start = h("button", { class: "btn primary", text: "Start Scout" });
+  start.addEventListener("click", async () => {
+    const request = input.value.trim().replace(/^(?!build a deal flow)/i, "Build a deal flow for ");
+    if (!input.value.trim()) return input.focus();
+    start.disabled = true;
+    status.textContent = "Starting …";
+    try {
+      const response = await fetch(`${CONFIG.workerUrl.replace(/\/+$/, "")}/scout`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, code: code.value }),
+      });
+      const answer = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(answer.error || `Error ${response.status}`);
+      store.set("scoutCode", code.value);
+      status.textContent = "Started ✓ The agents are working. Reload this site in about 10 minutes: the Scout will be in the sidebar.";
+    } catch (error) {
+      status.textContent = `Could not start: ${error.message}`;
+      start.disabled = false;
+    }
+  });
   fill(DIALOG,
     h("h3", { text: "◉ New Scout" }),
     h("p", { class: "muted", text: "A Scout is a deal flow request. Two AI agents search Y Combinator, the accelerators and the web, rate every fit from 1 to 5 stars, and search again every Monday." }),
     input,
-    h("ol", { class: "muted" },
+    CONFIG.workerUrl ? code : null,
+    CONFIG.workerUrl ? status : h("ol", { class: "muted" },
       h("li", { text: "Describe the topic, the stage and the region." }),
       h("li", { text: "Click the button: the request is copied and the GitHub page opens." }),
       h("li", { text: "There click “Run workflow”, paste the request into the first field and start it." }),
       h("li", { text: "After about 10 minutes reload this site: the Scout is in the sidebar." })),
-    h("div", { class: "btn-row" }, copy, h("button", { class: "btn", text: "Close", onclick: () => DIALOG.close() })));
+    h("div", { class: "btn-row" }, CONFIG.workerUrl ? start : copy, h("button", { class: "btn", text: "Close", onclick: () => DIALOG.close() })));
   if (!DIALOG.open) DIALOG.showModal();
   input.focus();
 }

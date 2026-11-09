@@ -49,6 +49,29 @@ Commit and push. The Ask field now writes AI answers.
 If your website is not at `https://jonkaliner.github.io`, change `ALLOWED_ORIGINS` in `wrangler.toml`
 (comma separated for several sites) and deploy again. A call from any other website is refused.
 
+## Start a Scout from the website (no GitHub page needed)
+
+The same Worker can start the "Update" workflow with your request, so the **New Scout** button on the website works by
+itself. It needs two more secrets:
+
+1. **A GitHub token that can only start workflows.** GitHub, your profile picture, *Settings*, *Developer settings*,
+   *Personal access tokens*, *Fine-grained tokens*, *Generate new token*.
+   - Repository access: *Only select repositories*, choose `git-init-searchbrain`.
+   - Permissions, *Repository permissions*: **Actions: Read and write**. Nothing else.
+   - Set an expiry date (for example one year) and copy the token once.
+2. **An access code** that only you know (a few random words). The website asks for it, so strangers cannot start Scouts.
+
+Add both as secrets of the Worker (never in a file):
+
+```
+npx wrangler secret put GITHUB_PAT       # the token from step 1
+npx wrangler secret put SCOUT_CODE       # your access code
+```
+
+(In the dashboard: Worker, *Settings*, *Variables and Secrets*.) Then open the website, click **New Scout**, type
+the request and the access code once; the browser remembers the code. If the repository has another name, set
+`GITHUB_REPO` in `wrangler.toml`.
+
 ## What protects it
 
 The Worker address is public, so anyone who finds it could send questions. That is limited on purpose:

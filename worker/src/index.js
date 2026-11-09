@@ -9,6 +9,10 @@
 //  - small input limits, a fixed system prompt, a fixed model, at most 400 answer tokens
 //  - an optional rate limit per visitor (see wrangler.toml)
 // The key is a Worker secret called NVIDIA_API_KEY and is only used for the call to NVIDIA.
+//
+// Second job: POST /scout {request, code} starts the "Update" workflow on GitHub with that request, so a new Scout
+// can be started from the website. It needs the secrets GITHUB_PAT (a GitHub token that may only start workflows of
+// this repository) and SCOUT_CODE (an access code that only you know, so strangers cannot start Scouts).
 
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
@@ -84,6 +88,48 @@ function failure(status, message, origin) {
   });
 }
 
+/** Compare two strings without stopping at the first difference. */
+function sameText(a, b) {
+  const x = String(a);
+  const y = String(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i += 1) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  return diff === 0;
+}
+
+/** POST /scout: start the "Update" workflow on GitHub with a request. Needs the access code. */
+async function startScout(payload, request, env, origin) {
+  if (!env.GITHUB_PAT || !env.SCOUT_CODE) return failure(500, "Starting Scouts is not set up in the Worker yet.", origin);
+  const text = cleanText(payload && payload.request, LIMITS.question);
+  if (text.length < 10) return failure(400, "Please describe the request in a few words.", origin);
+  if (!sameText(payload.code ?? "", env.SCOUT_CODE)) return failure(403, "The access code is wrong.", origin);
+  if (env.RATE_LIMITER) {
+    const visitor = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (!(await env.RATE_LIMITER.limit({ key: `scout:${visitor}` })).success) return failure(429, "Too many requests. Please wait a minute.", origin);
+  }
+  let answer;
+  try {
+    answer = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO || "jonkaliner/git-init-searchbrain"}/actions/workflows/update.yml/dispatches`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.GITHUB_PAT}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "searchbrain-worker",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ref: "main", inputs: { request: text } }),
+    });
+  } catch {
+    return failure(502, "GitHub could not be reached.", origin);
+  }
+  if (answer.status !== 204) {
+    console.log(`GitHub answered ${answer.status}`);
+    return failure(502, "GitHub did not accept the request.", origin);
+  }
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...corsHeaders(origin) } });
+}
+
 export async function handle(request, env) {
   const origin = request.headers.get("Origin");
   if (!origin || !allowedOrigins(env).includes(origin)) return failure(403, "This origin is not allowed.", null);
@@ -98,6 +144,8 @@ export async function handle(request, env) {
   } catch {
     return failure(400, "The body is not valid JSON.", origin);
   }
+  const path = request.url ? new URL(request.url).pathname.replace(/\/+$/, "") : "";
+  if (path.endsWith("/scout")) return startScout(payload, request, env, origin);
   const input = validate(payload);
   if (input.error) return failure(400, input.error, origin);
 
