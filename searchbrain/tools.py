@@ -12,7 +12,7 @@ import threading
 
 from langchain_core.tools import tool
 
-from searchbrain import db, feeds, search, web
+from searchbrain import db, feeds, portfolio, search, web
 from searchbrain.log import get_logger
 from searchbrain.models import Startup
 
@@ -113,6 +113,23 @@ def search_program_news(keywords: str) -> str:
 
 
 @tool
+def search_portfolios(keywords: str) -> str:
+    """Search the portfolio pages of about 70 accelerators and incubators (the pages that list their startups).
+    keywords: two to four topic words, e.g. "robotics hardware". A page needs at least half of them.
+    Returns up to 6 pages with the text around the match. The startups named there are candidates: copy
+    their names exactly. Use read_page on the page address to see more."""
+    _note("search_portfolios", repr(keywords))
+    conn = db.connect()
+    try:
+        pages = portfolio.search_pages(conn, keywords, limit=6)
+    finally:
+        conn.close()
+    if not pages:
+        return _return("No accelerator portfolio page matches these words. Try different or more general words.")
+    return _return(json.dumps([{"program": p["program"], "url": p["url"], "text": p["text"]} for p in pages], ensure_ascii=False))
+
+
+@tool
 def search_web(query: str) -> str:
     """Search the web (DuckDuckGo). Use it for startups the database and the accelerator posts do not show.
     query: a normal search query, e.g. "dexterous robot hand startup seed funding".
@@ -133,5 +150,5 @@ def read_page(url: str) -> str:
     return _return(f"{url}\n{web.page_text(url, limit=3500)}")
 
 
-SCOUT_TOOLS = [search_known_startups, search_program_news, search_web, read_page]
+SCOUT_TOOLS = [search_known_startups, search_program_news, search_portfolios, search_web, read_page]
 ANALYST_TOOLS = [search_web, read_page]

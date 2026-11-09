@@ -139,6 +139,6 @@ def test_the_crew_has_two_agents_with_the_right_tools(monkeypatch):
     team = crew.build_crew("Build a deal flow for robot hands")
     scout, analyst = team.agents
     assert [a.role for a in team.agents] == ["Startup Scout", "Startup Analyst"]
-    assert {t.name for t in scout.tools} == {"search_known_startups", "search_program_news", "search_web", "read_page"}
+    assert {t.name for t in scout.tools} == {"search_known_startups", "search_program_news", "search_portfolios", "search_web", "read_page"}
     assert {t.name for t in analyst.tools} == {"search_web", "read_page"}
     assert "robot hands" in team.tasks[0].description and team.tasks[1].context == [team.tasks[0]]

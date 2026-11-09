@@ -62,8 +62,9 @@ SCOUT_TASK = """The investor asks: "<<request>>"
 Find 10 to 20 startups that could fit. Work in this order:
 1. search_known_startups: two or three times, with different short keyword combinations. The database holds all active Y Combinator companies.
 2. search_program_news: once or twice, to see what accelerators announced lately.
-3. search_web: up to three times, for companies the first two steps did not show.
-4. read_page: at most twice, only for a very promising page (e.g. an accelerator post that lists startups).
+3. search_portfolios: once or twice. These are the startup lists of about 70 accelerators.
+4. search_web: up to three times, for companies the steps before did not show.
+5. read_page: at most twice, only for a very promising page (e.g. an accelerator post that lists startups).
 Stop as soon as you have enough candidates. Never repeat a search that gave nothing.
 
 Only list startups that appear in your tool results. Copy names, websites and places from the results.

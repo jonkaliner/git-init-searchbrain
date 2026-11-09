@@ -13,6 +13,8 @@ def fake_steps(tmp_path, monkeypatch):
     monkeypatch.setattr(update.yc, "import_all", lambda conn: calls.append("yc") or {"new": 1})
     monkeypatch.setattr(update.feeds, "discover", lambda: calls.append("discover") or [{"feed_url": "x"}])
     monkeypatch.setattr(update.feeds, "refresh", lambda conn: calls.append("refresh") or {"new_posts": 2})
+    monkeypatch.setattr(update.portfolio, "discover", lambda: calls.append("portfolio-discover") or [{"urls": "x"}])
+    monkeypatch.setattr(update.portfolio, "refresh", lambda conn: calls.append("portfolio-refresh") or {"pages": 1})
     monkeypatch.setattr(update, "run_scouts", lambda conn, requests=None: calls.append(("scouts", requests)) or {"a": "1 matches"})
     monkeypatch.setattr(update.export, "export_site", lambda conn: calls.append("export") or {"startups": 1})
     return calls
@@ -25,7 +27,7 @@ def run(monkeypatch, *args):
 
 def test_weekly_update_runs_all_steps_in_order(fake_steps, monkeypatch):
     run(monkeypatch)
-    assert fake_steps == ["yc", "discover", "refresh", ("scouts", None), "export"]
+    assert fake_steps == ["yc", "discover", "refresh", "portfolio-discover", "portfolio-refresh", ("scouts", None), "export"]
 
 
 def test_a_request_runs_only_that_scout_and_exports(fake_steps, monkeypatch):
@@ -47,7 +49,7 @@ def test_a_failing_step_does_not_stop_the_others_but_fails_the_run(fake_steps, m
         run(monkeypatch)
 
     assert stop.value.code == 1
-    assert fake_steps == ["discover", "refresh", ("scouts", None), "export"]  # everything after the failure still ran
+    assert fake_steps == ["discover", "refresh", "portfolio-discover", "portfolio-refresh", ("scouts", None), "export"]  # everything after the failure still ran
     assert "Y Combinator list is down" in capsys.readouterr().out
 
 

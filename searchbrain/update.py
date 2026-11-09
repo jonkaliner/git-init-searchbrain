@@ -17,12 +17,12 @@ import argparse
 import sys
 import time
 
-from searchbrain import db, export, feeds, scouts, yc
+from searchbrain import db, export, feeds, portfolio, scouts, yc
 from searchbrain.log import get_logger
 
 logger = get_logger(__name__)
 
-STEPS = ["yc", "feeds", "scouts", "export"]
+STEPS = ["yc", "feeds", "portfolios", "scouts", "export"]
 
 
 def run_step(name: str, function, problems: list[str]):
@@ -78,6 +78,8 @@ def main() -> None:
         run_step("YC directory", lambda: yc.import_all(conn), problems)
     if "feeds" in chosen:
         run_step("Accelerator feeds", lambda: {**{"programs_with_feed": sum(1 for r in feeds.discover() if r["feed_url"])}, **feeds.refresh(conn)}, problems)
+    if "portfolios" in chosen:
+        run_step("Portfolio pages", lambda: {**{"programs_with_pages": sum(1 for r in portfolio.discover() if r["urls"])}, **portfolio.refresh(conn)}, problems)
     if "scouts" in chosen:
         run_step("Scouts", lambda: run_scouts(conn, args.request or None), problems)
     if "export" in chosen:

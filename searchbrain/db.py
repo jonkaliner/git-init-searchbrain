@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS feed_entries (
     fetched_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS portfolio_pages (
+    url TEXT PRIMARY KEY,
+    program TEXT NOT NULL,
+    text TEXT,
+    fetched_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scouts (
     id TEXT PRIMARY KEY,
     request TEXT NOT NULL,
