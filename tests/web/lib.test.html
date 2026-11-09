@@ -62,6 +62,10 @@ check("name without legal ending", lib.searchStartups(names, "what does Procepti
 check("one-word name needs a capital letter", [lib.searchStartups(names, "Neuralink").map((s) => s.key), lib.exactNameMatches(names, "robotics startups").map((s) => s.key)], [["neuralink.com"], []]);
 check("topic search still returns several", lib.searchStartups(names, "robotic arms humanoid").length > 1, true);
 
+// website link
+check("website link", [lib.websiteLink({ name: "Mimic", link: "mimic.ai" }), lib.websiteLink({ name: "Neura Link & Co" })],
+  [{ url: "https://mimic.ai/", text: "Website", known: true }, { url: "https://duckduckgo.com/?q=Neura%20Link%20%26%20Co%20official%20website", text: "Find website", known: false }]);
+
 // deal flow requests
 check("deal flow request", [lib.isDealFlowRequest("Build a deal flow for lidar"), lib.isDealFlowRequest("Find startups in battery recycling"), lib.isDealFlowRequest("make me a dealflow")], [true, false, true]);
 

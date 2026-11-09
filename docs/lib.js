@@ -194,3 +194,10 @@ export function workerRecord(s) {
   const pick = { name: s.name, what: s.description, industry: s.industry, country: s.country, city: s.city, founded: s.year, website: s.link, yc_batch: s.batch, programs: s.programs };
   return Object.fromEntries(Object.entries(pick).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 }
+
+/** The company's website, or (when the data has none) a web search for it, so there is always a link. */
+export function websiteLink(s) {
+  const known = safeUrl(s.link);
+  if (known) return { url: known, text: "Website", known: true };
+  return { url: `https://duckduckgo.com/?q=${encodeURIComponent(`${s.name} official website`)}`, text: "Find website", known: false };
+}

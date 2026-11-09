@@ -101,7 +101,7 @@ function newMatchesOf(scout) {
 function popupNode(s) {
   const details = [s.industry, s.city, s.country, s.year, s.batch && `YC ${s.batch}`].filter(Boolean).join(" · ");
   return h("div", {}, h("strong", { text: s.name }), h("p", { class: "muted", text: details }), h("p", { text: s.summary || s.description || "" }),
-    h("p", {}, h("a", { href: s.link, text: "Website" }), " ", h("a", { href: s.source, text: "Source" }), " ", h("a", { href: "#/", text: "Details", onclick: (e) => { e.preventDefault(); openStartup(s.key); } })));
+    h("p", {}, h("a", { href: lib.websiteLink(s).url, text: lib.websiteLink(s).text }), " ", h("a", { href: s.source, text: "Source" }), " ", h("a", { href: "#/", text: "Details", onclick: (e) => { e.preventDefault(); openStartup(s.key); } })));
 }
 
 /** A Leaflet map in `element`. update(list) replaces the markers. Returns null when the map library did not load. */
@@ -177,7 +177,8 @@ function profile(s, number, match) {
   const facts = [field("Location", lib.placeOf(s)), field("Founded", s.year || "unknown")];
   if (s.batch) facts.push(field("YC", s.batch));
   if (s.industry) facts.push(field("Industry", s.industry));
-  const links = [s.link && h("a", { href: s.link, text: "Website" }), s.source && h("a", { href: s.source, text: "Source" })].filter(Boolean);
+  const site = lib.websiteLink(s);
+  const links = [h("a", { href: site.url, text: site.text }), s.source && h("a", { href: s.source, text: "Source" })].filter(Boolean);
   return h("div", { class: "profile" },
     h("div", { class: "profile-head" },
       h("span", { class: "number", text: `${number}.` }),
@@ -205,7 +206,7 @@ function openStartup(key) {
     h("p", { text: s.summary || s.description || "No description yet." }),
     s.description && s.summary && s.description !== s.summary ? h("details", {}, h("summary", { text: "Original description from the source" }), h("p", { text: s.description })) : null,
     h("div", { class: "btn-row" },
-      s.link ? h("a", { class: "btn", href: s.link, text: "🌐 Website" }) : null,
+      h("a", { class: "btn", href: lib.websiteLink(s).url, text: `🌐 ${lib.websiteLink(s).text}` }),
       s.source ? h("a", { class: "btn", href: s.source, text: "📰 Source" }) : null,
       favorite,
       h("button", { class: "btn", text: "Close", onclick: () => DIALOG.close() })));
@@ -287,7 +288,7 @@ const COLUMNS = [
   { label: "Founded", key: "year", cell: (s) => s.year },
   { label: "YC", key: "batch", cell: (s) => s.batch },
   { label: "Program", key: "programs", cell: (s) => s.programs },
-  { label: "Website", cell: (s) => (s.link ? h("a", { href: s.link, text: "Website", onclick: (e) => e.stopPropagation() }) : "") },
+  { label: "Website", cell: (s) => h("a", { href: lib.websiteLink(s).url, text: lib.websiteLink(s).text, onclick: (e) => e.stopPropagation() }) },
   { label: "Source", cell: (s) => (s.source ? h("a", { href: s.source, text: "Source", onclick: (e) => e.stopPropagation() }) : "") },
 ];
 
