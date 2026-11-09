@@ -386,8 +386,6 @@ function batchOrder(code) {
 }
 
 function viewCharts() {
-  const withYear = state.startups.filter((s) => s.year);
-  const years = lib.countBy(withYear, (s) => s.year, 40).sort((a, b) => a[0] - b[0]);
   const batches = lib.countBy(state.startups.filter((s) => s.batch), (s) => s.batch, 200).sort((a, b) => batchOrder(a[0]) - batchOrder(b[0]));
   fill(MAIN,
     h("h2", { text: "Charts" }),
@@ -397,11 +395,7 @@ function viewCharts() {
     h("div", { class: "card" }, h("strong", { text: "By Y Combinator batch" }),
       batches.length
         ? columnChart(batches, (code) => code, "W = winter, X = spring, S = summer, F = fall. The number is the year, e.g. W24 = winter 2024.")
-        : h("p", { class: "muted", text: "No Y Combinator companies yet." })),
-    h("div", { class: "card" }, h("strong", { text: "By founding year" }),
-      years.length
-        ? columnChart(years, (year) => String(year).slice(2), `${(state.startups.length - withYear.length).toLocaleString("en")} startups with an unknown founding year are not shown (the Y Combinator list has none).`)
-        : h("p", { class: "muted", text: "No founding years known yet." })));
+        : h("p", { class: "muted", text: "No Y Combinator companies yet." })));
 }
 
 function viewFavorites() {
