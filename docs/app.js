@@ -241,11 +241,11 @@ function viewHome() {
     h("p", { class: "hint", text: CONFIG.workerUrl ? "Enter to send · answers are written by an AI from the saved startups" : "Enter to send · searches the saved startups" }),
     h("div", { class: "thread", id: "thread" }),
     h("div", { class: "section-label" }, h("span", { text: "🗺️  Where the startups are" }),
-      h("span", { class: "muted", text: `${plural(state.startups.length, "startup")} · ${plural(countries, "country", "countries")} · ${located.toLocaleString("en")} on the map` })),
+      h("span", { class: "muted", id: "map-note", text: "Search above to see the found startups here" })),
     h("div", { class: "card map-card" }, h("div", { id: "home-map" })),
     h("div", { class: "section-label" }, h("span", { text: "◉  Your Scouts" }), h("span", { text: "Saved deal flows that show what is new" })),
     h("div", { class: "cards" }, scouts));
-  mountMap("home-map", state.startups);
+  mountMap("home-map", []); // empty until something is searched
   renderThread();
 }
 
@@ -526,6 +526,19 @@ function renderThread() {
         h("p", { class: "muted", text: "Found in the saved data, ranked by your words. Stars come from a deal flow, where the Analyst rates every fit." })) : null);
   }));
   thread.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  showResultsOnMap(messages);
+}
+
+/** The home map shows the startups of the latest answer, and nothing before the first search. */
+function showResultsOnMap(messages) {
+  const latest = [...messages].reverse().find((m) => m.role === "assistant");
+  const found = (latest?.keys || []).map((k) => state.byKey.get(k)).filter(Boolean);
+  state.map?.update(found, { fit: true });
+  const note = document.getElementById("map-note");
+  if (note) {
+    const placed = found.filter((s) => s.lat != null).length;
+    note.textContent = latest ? `${plural(found.length, "startup")} found · ${placed} with a location` : "Search above to see the found startups here";
+  }
 }
 
 // ---------- sidebar and routing ----------
