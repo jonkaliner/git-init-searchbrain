@@ -276,7 +276,9 @@ function filteredStartups() {
   const { key, dir } = state.sort;
   const found = state.startups.filter((s) => lib.matchesFilters(s, f));
   const value = (s) => (key === "year" ? s.year ?? -1 : String(s[key] ?? "").toLowerCase());
-  return found.sort((a, b) => (value(a) < value(b) ? -dir : value(a) > value(b) ? dir : 0) || a.name.localeCompare(b.name));
+  const empty = (s) => s[key] == null || s[key] === "";
+  // empty cells always go to the bottom, in both sort directions
+  return found.sort((a, b) => (empty(a) - empty(b)) || (empty(a) ? 0 : value(a) < value(b) ? -dir : value(a) > value(b) ? dir : 0) || a.name.localeCompare(b.name));
 }
 
 const COLUMNS = [
