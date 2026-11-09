@@ -55,11 +55,40 @@ export function topicWordsWithoutCountries(text, countries) {
   return topicWords(text).filter((w) => !countryWords.has(w) && !aliasWords.has(w));
 }
 
+/** Words of a company name without legal endings ("Proception Inc" -> ["proception"]). */
+const LEGAL_ENDINGS = new Set(["inc", "incorporated", "ltd", "limited", "llc", "gmbh", "ag", "sa", "sas", "bv", "plc", "corp", "corporation", "co"]);
+
+function nameWords(name) {
+  return tokenize(name).filter((word) => !LEGAL_ENDINGS.has(word));
+}
+
 /**
- * Rank the startups for a request like the database search does: a startup needs at least half of the
- * words; a word in the name or the one-liner counts double compared to the industry or the long summary.
+ * Startups whose full name is written in the request. Names of several words always count. A one-word name only
+ * counts when it is written with a capital letter ("Robotics startups" must not find a company called Robotics).
+ */
+export function exactNameMatches(startups, query) {
+  const asked = tokenize(query).join(" ");
+  const original = String(query || "");
+  const found = startups.filter((s) => {
+    const words = nameWords(s.name);
+    if (!words.length || words.join("").length < 3) return false;
+    if (!` ${asked} `.includes(` ${words.join(" ")} `)) return false;
+    if (words.length > 1) return true;
+    const shown = String(s.name).trim().split(/\s+/)[0];
+    return /^[A-Z0-9]/.test(shown) && original.split(/[^A-Za-z0-9]+/).includes(shown);
+  });
+  const longest = Math.max(0, ...found.map((s) => nameWords(s.name).length));
+  return found.filter((s) => nameWords(s.name).length === longest); // "Neura Robotics" wins over a company just called "Neura"
+}
+
+/**
+ * Search for a request. A startup whose full name is in the request is the only answer. Otherwise rank like the
+ * database search does: a startup needs at least half of the words; a word in the name or the one-liner counts
+ * double compared to the industry or the long summary.
  */
 export function searchStartups(startups, query, { limit = 12 } = {}) {
+  const exact = exactNameMatches(startups, query);
+  if (exact.length) return exact.slice(0, limit);
   const knownCountries = [...new Set(startups.map((s) => s.country).filter(Boolean))];
   const countries = countriesInText(query, knownCountries);
   const words = topicWordsWithoutCountries(query, countries);

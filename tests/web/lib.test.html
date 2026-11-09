@@ -48,6 +48,20 @@ check("region filter", lib.searchStartups(startups, "Build a deal flow for auton
 check("nothing to search for", lib.searchStartups(startups, "build a deal flow for"), []);
 check("limit", lib.searchStartups(startups, "robot", { limit: 1 }).length, 1);
 
+// exact company names
+const names = [
+  { key: "neura.com", name: "NEURA Robotics", description: "Humanoid robot 4NE-1", country: "Germany" },
+  { key: "neuralink.com", name: "Neuralink", description: "Brain-computer interface startup" },
+  { key: "robotics.io", name: "Robotics", description: "A company called Robotics" },
+  { key: "x.com", name: "Proception Inc", description: "Robot hands" },
+  { key: "y.com", name: "Other Robot Co", description: "Robotic arms" },
+];
+check("exact name shows only that company", lib.searchStartups(names, "Robotic company with the name Neura Robotics").map((s) => s.key), ["neura.com"]);
+check("exact name alone", lib.searchStartups(names, "neura robotics").map((s) => s.key), ["neura.com"]);
+check("name without legal ending", lib.searchStartups(names, "what does Proception do").map((s) => s.key), ["x.com"]);
+check("one-word name needs a capital letter", [lib.searchStartups(names, "Neuralink").map((s) => s.key), lib.exactNameMatches(names, "robotics startups").map((s) => s.key)], [["neuralink.com"], []]);
+check("topic search still returns several", lib.searchStartups(names, "robotic arms humanoid").length > 1, true);
+
 // deal flow requests
 check("deal flow request", [lib.isDealFlowRequest("Build a deal flow for lidar"), lib.isDealFlowRequest("Find startups in battery recycling"), lib.isDealFlowRequest("make me a dealflow")], [true, false, true]);
 
